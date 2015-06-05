@@ -1,3 +1,5 @@
+(require racket/trace)
+
 ;;; 28 November 02014 WEB
 ;;;
 ;;; * Fixed missing unquote before E in 'drop-Y-b/c-dup-var'
@@ -16,7 +18,11 @@
 ;;; abandons E, if it succeeds.  If there is no failure by then, there were no eigen
 ;;; violations.
 
-(define empty-c '(() () () () () () ()))
+
+; Returns #f if not found, or a pair of u and the result of the lookup.
+; This distinguishes between #f indicating absence and being the result.
+
+(define empty-c `(() () ,empty-subst () () () ()))
 
 (define eigen-tag (vector 'eigen-tag))
 
@@ -44,7 +50,7 @@
 (define rhs
   (lambda (pr)
     (cdr pr)))
- 
+
 (define lhs
   (lambda (pr)
     (car pr)))
@@ -65,24 +71,40 @@
   (lambda (x)
     (and (vector? x) (not (eq? (vector-ref x 0) eigen-tag)))))
 
-(define walk
-  (lambda (u S)
-    (cond
-      ((and (var? u) (assq u S)) =>
-       (lambda (pr) (walk (rhs pr) S)))
-      (else u))))
+(define var-eq? eq?)
 
-(define prefix-S
-  (lambda (S+ S)
-    (cond
-      ((eq? S+ S) '())
-      (else (cons (car S+)
-              (prefix-S (cdr S+) S))))))
+(define (make-walk my-subst-lookup)
+  (define f
+    (lambda (u S)
+      (cond
+        ((and (var? u) (my-subst-lookup u S)) =>
+           (lambda (pr) (f (rhs pr) S)))
+        (else u))))
+  f)
 
-(define unify
-  (lambda (u v s)
-    (let ((u (walk u s))
-          (v (walk v s)))
+(define walk (make-walk subst-lookup))
+
+(define (make-unify ext-s mywalk)
+  (define occurs-check
+    (lambda (x v s)
+      (let ((v (mywalk v s)))
+        (cond
+          ((var? v) (var-eq? v x))
+          ((pair? v)
+           (or
+             (occurs-check x (car v) s)
+             (occurs-check x (cdr v) s)))
+          (else #f)))))
+
+  (define ext-s-check
+    (lambda (x v s)
+      (cond
+        ((occurs-check x v s) #f)
+        (else (ext-s s x v)))))
+
+  (define (unify u v s)
+    (let ((u (mywalk u s))
+          (v (mywalk v s)))
       (cond
         ((eq? u v) s)
         ((var? u) (ext-s-check u v s))
@@ -92,18 +114,16 @@
            (and s (unify (cdr u) (cdr v) s))))
         ((or (eigen? u) (eigen? v)) #f)
         ((equal? u v) s)
-        (else #f)))))
+        (else #f))))
 
-(define occurs-check
-  (lambda (x v s)
-    (let ((v (walk v s)))
-      (cond
-        ((var? v) (eq? v x))
-        ((pair? v) 
-         (or 
-           (occurs-check x (car v) s)
-           (occurs-check x (cdr v) s)))
-        (else #f)))))
+  unify)
+
+(define unify (make-unify subst-add walk))
+
+(define alist-walk (make-walk assq))
+(define alist-ext-s
+  (lambda (S var val) (cons (cons var val) S)))
+(define alist-unify (make-unify alist-ext-s alist-walk))
 
 (define eigen-occurs-check
   (lambda (e* x s)
@@ -111,24 +131,18 @@
       (cond
         ((var? x) #f)
         ((eigen? x) (memq x e*))
-        ((pair? x) 
-         (or 
+        ((pair? x)
+         (or
            (eigen-occurs-check e* (car x) s)
            (eigen-occurs-check e* (cdr x) s)))
         (else #f)))))
 
 (define empty-f (lambdaf@ () (mzero)))
 
-(define ext-s-check
-  (lambda (x v s)
-    (cond
-      ((occurs-check x v s) #f)
-      (else (cons `(,x . ,v) s)))))
-
-(define unify*  
+(define unify*
   (lambda (S+ S)
     (unify (map lhs S+) (map rhs S+) S)))
- 
+
 (define-syntax case-inf
   (syntax-rules ()
     ((_ e (() e0) ((f^) e1) ((c^) e2) ((c f) e3))
@@ -139,7 +153,7 @@
          ((not (and (pair? c-inf)
                  (procedure? (cdr c-inf))))
           (let ((c^ c-inf)) e2))
-         (else (let ((c (car c-inf)) (f (cdr c-inf))) 
+         (else (let ((c (car c-inf)) (f (cdr c-inf)))
                  e3)))))))
 
 (define-syntax fresh
@@ -183,17 +197,17 @@
           empty-c))))
     ((_ n (q0 q1 q ...) g0 g ...)
      (run n (x) (fresh (q0 q1 q ...) g0 g ... (== `(,q0 ,q1 ,q ...) x))))))
- 
+
 (define-syntax run*
   (syntax-rules ()
     ((_ (q0 q ...) g0 g ...) (run #f (q0 q ...) g0 g ...))))
- 
+
 (define take
   (lambda (n f)
     (cond
       ((and n (zero? n)) '())
       (else
-       (case-inf (f) 
+       (case-inf (f)
          (() '())
          ((f) (take n f))
          ((c) (cons c '()))
@@ -204,17 +218,17 @@
   (syntax-rules ()
     ((_ (g0 g ...) (g1 g^ ...) ...)
      (lambdag@ (c)
-       (inc 
+       (inc
          (mplus*
            (bind* (g0 c) g ...)
            (bind* (g1 c) g^ ...) ...))))))
- 
+
 (define-syntax mplus*
   (syntax-rules ()
     ((_ e) e)
     ((_ e0 e ...) (mplus e0
                     (lambdaf@ () (mplus* e ...))))))
- 
+
 (define mplus
   (lambda (c-inf f)
     (case-inf c-inf
@@ -239,7 +253,7 @@
        (inc
          (ifa ((g0 c) g ...)
               ((g1 c) g^ ...) ...))))))
- 
+
 (define-syntax ifa
   (syntax-rules ()
     ((_) (mzero))
@@ -258,7 +272,7 @@
        (inc
          (ifu ((g0 c) g ...)
               ((g1 c) g^ ...) ...))))))
- 
+
 (define-syntax ifu
   (syntax-rules ()
     ((_) (mzero))
@@ -282,7 +296,7 @@
 
 (define untyped-var?
   (lambda (S Y N t^)
-    (let ((in-type? (lambda (y) (eq? (walk y S) t^))))
+    (let ((in-type? (lambda (y) (var-eq? (walk y S) t^))))
       (and (var? t^)
            (not (exists in-type? Y))
            (not (exists in-type? N))))))
@@ -308,9 +322,9 @@
     (let ((v (walk v S)))
       (cond
         ((var? v)
-         (let ((n (length S)))
+         (let ((n (subst-length S)))
            (let ((name (reify-name n)))
-             (cons `(,v . ,name) S))))
+             (subst-add S v name))))
         ((pair? v)
          (let ((S (reify-S (car v) S)))
            (reify-S (cdr v) S)))
@@ -332,17 +346,17 @@
 (define sorter
   (lambda (ls)
     (list-sort lex<=? ls)))
-                              
+
 (define lex<=?
   (lambda (x y)
     (string<=? (datum->string x) (datum->string y))))
-  
+
 (define datum->string
   (lambda (x)
     (call-with-string-output-port
       (lambda (p) (display x p)))))
 
-(define anyvar? 
+(define anyvar?
   (lambda (u r)
     (cond
       ((pair? u)
@@ -350,7 +364,7 @@
            (anyvar? (cdr u) r)))
       (else (var? (walk u r))))))
 
-(define anyeigen? 
+(define anyeigen?
   (lambda (u r)
     (cond
       ((pair? u)
@@ -358,7 +372,7 @@
            (anyeigen? (cdr u) r)))
       (else (eigen? (walk u r))))))
 
-(define member* 
+(define member*
   (lambda (u v)
     (cond
       ((equal? u v) #t)
@@ -396,7 +410,7 @@
 (define same-var?
   (lambda (v)
     (lambda (v^)
-      (and (var? v) (var? v^) (eq? v v^)))))
+      (and (var? v) (var? v^) (var-eq? v v^)))))
 
 (define find-dup
   (lambda (f S)
@@ -474,7 +488,7 @@
 
 (define sym?
   (lambda (S Y y)
-    (let ((y (walk y S)))          
+    (let ((y (walk y S)))
       (cond
         ((var? y) (tagged? S Y y))
         (else (symbol? y))))))
@@ -599,7 +613,7 @@
         (else
          (let ((c^^ ((car fns^) c^)))
            (cond
-             ((not (eq? c^^ c^))                                    
+             ((not (eq? c^^ c^))
               (loop c^^ (cdr fns^) (length (LOF))))
              (else (loop c^ (cdr fns^) (sub1 n))))))))))
 
@@ -632,7 +646,7 @@
     (cond
       ((unify u t S) =>
        (lambda (S0)
-         (eq? S0 S)))
+         (subst-eq? S0 S)))
       (else #f))))
 
 (define ground-non-<type>?
@@ -642,7 +656,7 @@
         (cond
           ((var? u) #f)
           (else (not (pred u))))))))
-;; moved 
+;; moved
 (define ground-non-symbol?
   (ground-non-<type>? symbol?))
 
@@ -657,7 +671,7 @@
         [(mem-check u N S) (mzero)]
         [else (unit `(,B ,E ,S ,D (,u . ,Y) ,N ,T))]))))
 
-(define numbero 
+(define numbero
   (lambda (u)
     (lambdag@ (c : B E S D Y N T)
       (cond
@@ -671,11 +685,10 @@
     (lambdag@ (c : B E S D Y N T)
       (cond
         ((unify u v S) =>
-         (lambda (S0)
-           (let ((pfx (prefix-S S0 S)))
-             (cond
-               ((null? pfx) (mzero))
-               (else (unit `(,B ,E ,S (,pfx . ,D) ,Y ,N ,T)))))))
+         (lambda (S+)
+           (if (subst-eq? S+ S)
+             (mzero)
+             (unit `(,B ,E ,S (((,u . ,v)) . ,D) ,Y ,N ,T)))))
         (else c)))))
 
 (define ==
@@ -731,7 +744,7 @@
     (lambda (d)
       (cond
         ((unify* d S) =>
-	 (lambda (S+) (eq? S+ S)))
+           (lambda (S+) (subst-eq? S+ S)))
         (else #f)))))
 
 (define reify
@@ -744,7 +757,7 @@
              (N (walk* (c->N c) S))
              (T (walk* (c->T c) S)))
         (let ((v (walk* x S)))
-          (let ((R (reify-S v '())))
+          (let ((R (reify-S v empty-subst)))
             (reify+ v R
                     (let ((D (remp
                               (lambda (d)
@@ -753,7 +766,7 @@
                                     (anyvar? dw R)
                                     (anyeigen? dw R))))
                                (rem-xx-from-d c))))
-                      (rem-subsumed D)) 
+                      (rem-subsumed D))
                     (remp
                      (lambda (y) (var? (walk y R)))
                      Y)
@@ -833,16 +846,21 @@
          (rem-subsumed (cdr D) d^*))
         (else (rem-subsumed (cdr D)
                 (cons (car D) d^*)))))))
- 
+
 (define subsumed?
   (lambda (d d*)
     (cond
       ((null? d*) #f)
       (else
-        (let ((d^ (unify* (car d*) d)))
+        (let* ((S (unify* d empty-subst))
+               (S+ (unify* (car d*) S)))
           (or
-            (and d^ (eq? d^ d))
+            (and S+ (subst-eq? S+ S))
             (subsumed? d (cdr d*))))))))
+
+(define alist-unify*
+  (lambda (S+ S)
+    (alist-unify (map lhs S+) (map rhs S+) S)))
 
 (define rem-xx-from-d
   (lambdag@ (c : B E S D Y N T)
@@ -854,11 +872,11 @@
                       (lambda (S0)
                         (cond
                           ((==fail-check B E S0 '() Y N T) #f)
-                          (else (prefix-S S0 S)))))
+                          (else (alist-unify* d '())))))
                      (else #f)))
                  D)))))
 
-(define rem-subsumed-T 
+(define rem-subsumed-T
   (lambda (T)
     (let rem-subsumed ((T T) (T^ '()))
       (cond
@@ -873,7 +891,7 @@
              (else (rem-subsumed (cdr T)
                      (cons (car T) T^))))))))))
 
-(define subsumed-T? 
+(define subsumed-T?
   (lambda (lit big T)
     (cond
       ((null? T) #f)
