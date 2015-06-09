@@ -1,6 +1,4 @@
-(require racket/trace)
-
-;;; 28 November 02014 WEB
+empty-subst-map;;; 28 November 02014 WEB
 ;;;
 ;;; * Fixed missing unquote before E in 'drop-Y-b/c-dup-var'
 ;;;
@@ -19,12 +17,6 @@
 ;;; violations.
 
 
-; Returns #f if not found, or a pair of u and the result of the lookup.
-; This distinguishes between #f indicating absence and being the result.
-
-(define empty-c `(() () ,empty-subst () () () ()))
-
-(define eigen-tag (vector 'eigen-tag))
 
 (define-syntax inc
   (syntax-rules ()
@@ -63,26 +55,95 @@
   (lambda (x)
     (and (vector? x) (eq? (vector-ref x 0) eigen-tag))))
 
+; The unique value for variables that have not yet been bound to a value
+(define unbound (list 'unbound))
+
 (define var
-  (lambda (dummy)
-    (vector dummy)))
+  (lambda (scope)
+    (vector unbound scope)))
 
 (define var?
   (lambda (x)
     (and (vector? x) (not (eq? (vector-ref x 0) eigen-tag)))))
 
+; Creates a new scope that is not scope-eq? to any other scope
+(define new-scope
+  (lambda ()
+    (list 'scope)))
+
+; Scope used when variable bindings should always be made in the substitution,
+; as in var=? and reification.
+(define nonlocal-scope
+  (list 'non-local-scope))
+
+(define scope-eq? eq?)
+
 (define var-eq? eq?)
+
+(define var-scope
+  (lambda (x)
+    (vector-ref x 1)))
+
+(define var-val
+  (lambda (x)
+    (vector-ref x 0)))
+
+(define set-var-val!
+  (lambda (x v)
+    (vector-set! x 0 v)))
+
+(define subst
+  (lambda (mapping scope)
+    (cons mapping scope)))
+
+(define subst-map
+  (lambda (s)
+    (car s)))
+
+(define subst-scope
+  (lambda (s)
+    (cdr s)))
+
+(define subst-length
+  (lambda (s)
+    (subst-map-length (subst-map s))))
+
+(define subst-eq?
+  (lambda (s1 s2)
+    (and (scope-eq? (subst-scope s1) (subst-scope s2))
+         (subst-map-eq? (subst-map s1) (subst-map s2)))))
+
+(define subst-with-scope
+  (lambda (s new-scope)
+    (subst (subst-map s) new-scope)))
+
+(define empty-subst (subst empty-subst-map 0))
+
+(define empty-c `(()            ; B - bindings
+                  ()            ; E - eigen
+                  ,empty-subst  ; S - substitution
+                  ()            ; D - disequality
+                  ()            ; Y - symbolo
+                  ()            ; N - numbero
+                  ()            ; T - absento
+                  ))
+
+(define eigen-tag (vector 'eigen-tag))
 
 (define (make-walk my-subst-lookup)
   (define f
     (lambda (u S)
-      (cond
-        ((and (var? u) (my-subst-lookup u S)) =>
-           (lambda (pr) (f (rhs pr) S)))
-        (else u))))
+      (if (var? u)
+        (if (eq? (var-val u) unbound)
+          (cond
+            ((my-subst-lookup u (subst-map S)) =>
+                                               (lambda (pr) (f (rhs pr) S)))
+            (else u))
+          (f (var-val u) S))
+        u)))
   f)
 
-(define walk (make-walk subst-lookup))
+(define walk (make-walk subst-map-lookup))
 
 (define (make-unify ext-s mywalk)
   (define occurs-check
@@ -118,12 +179,30 @@
 
   unify)
 
+(define subst-add
+  (lambda (S x v)
+    (if (scope-eq? (var-scope x) (subst-scope S))
+      (begin
+        (set-var-val! x v)
+        S)
+      (subst (subst-map-add (subst-map S) x v) (subst-scope S)))))
+
 (define unify (make-unify subst-add walk))
 
+
+; Variant of unification used for simplifying disequality constraints.
+
 (define alist-walk (make-walk assq))
-(define alist-ext-s
+
+(define alist-subst-map-add
   (lambda (S var val) (cons (cons var val) S)))
-(define alist-unify (make-unify alist-ext-s alist-walk))
+
+(define alist-subst-add
+  (lambda (S x v)
+    (subst (alist-subst-map-add (subst-map S) x v) (subst-scope S))))
+
+(define alist-unify (make-unify alist-subst-add alist-walk))
+
 
 (define eigen-occurs-check
   (lambda (e* x s)
@@ -161,7 +240,7 @@
     ((_ (x ...) g0 g ...)
      (lambdag@ (c : B E S D Y N T)
        (inc
-         (let ((x (var 'x)) ...)
+         (let ((x (var (subst-scope S))) ...)
            (let ((B (append `(,x ...) B)))
              (bind* (g0 `(,B ,E ,S ,D ,Y ,N ,T)) g ...))))))))
 
@@ -191,9 +270,11 @@
      (take n
        (lambdaf@ ()
          ((fresh (q) g0 g ...
-            (lambdag@ (final-c)
-              (let ((z ((reify q) final-c)))
-                (choice z empty-f))))
+            (lambdag@ (c : B E S D Y N T)
+              (begin
+                (let ((S (subst-with-scope S nonlocal-scope)))
+                  (let ((z ((reify q) `(,B ,E ,S ,D ,Y ,N ,T))))
+                    (choice z empty-f))))))
           empty-c))))
     ((_ n (q0 q1 q ...) g0 g ...)
      (run n (x) (fresh (q0 q1 q ...) g0 g ... (== `(,q0 ,q1 ,q ...) x))))))
@@ -217,11 +298,12 @@
 (define-syntax conde
   (syntax-rules ()
     ((_ (g0 g ...) (g1 g^ ...) ...)
-     (lambdag@ (c)
+     (lambdag@ (c : B E S D Y N T)
        (inc
-         (mplus*
-           (bind* (g0 c) g ...)
-           (bind* (g1 c) g^ ...) ...))))))
+         (let ((S (subst-with-scope S (new-scope))))
+           (mplus*
+             (bind* (g0 `(,B ,E ,S ,D ,Y ,N ,T)) g ...)
+             (bind* (g1 `(,B ,E ,S ,D ,Y ,N ,T)) g^ ...) ...)))))))
 
 (define-syntax mplus*
   (syntax-rules ()
@@ -318,7 +400,7 @@
         (else v)))))
 
 (define reify-S
-  (lambda  (v S)
+  (lambda (v S)
     (let ((v (walk v S)))
       (cond
         ((var? v)
@@ -379,8 +461,6 @@
       ((pair? v)
        (or (member* u (car v)) (member* u (cdr v))))
       (else #f))))
-
-;;;
 
 (define drop-N-b/c-const
   (lambdag@ (c : B E S D Y N T)
@@ -644,9 +724,9 @@
 (define term=?
   (lambda (u t S)
     (cond
-      ((unify u t S) =>
+      ((unify u t (subst-with-scope S nonlocal-scope)) =>
        (lambda (S0)
-         (subst-eq? S0 S)))
+         (subst-map-eq? (subst-map S0) (subst-map S))))
       (else #f))))
 
 (define ground-non-<type>?
@@ -684,9 +764,9 @@
   (lambda (u v)
     (lambdag@ (c : B E S D Y N T)
       (cond
-        ((unify u v S) =>
+        ((unify u v (subst-with-scope S nonlocal-scope)) =>
          (lambda (S+)
-           (if (subst-eq? S+ S)
+           (if (subst-map-eq? (subst-map S+) (subst-map S))
              (mzero)
              (unit `(,B ,E ,S (((,u . ,v)) . ,D) ,Y ,N ,T)))))
         (else c)))))
@@ -708,14 +788,15 @@
 
 (define ==fail-check
   (lambda (B E S0 D Y N T)
-    (cond
-      ((eigen-absento-fail-check E S0) #t)
-      ((atomic-fail-check S0 Y ground-non-symbol?) #t)
-      ((atomic-fail-check S0 N ground-non-number?) #t)
-      ((symbolo-numbero-fail-check S0 Y N) #t)
-      ((=/=-fail-check S0 D) #t)
-      ((absento-fail-check S0 T) #t)
-      (else #f))))
+    (let ([S0 (subst-with-scope S0 nonlocal-scope)])
+      (cond
+        ((eigen-absento-fail-check E S0) #t)
+        ((atomic-fail-check S0 Y ground-non-symbol?) #t)
+        ((atomic-fail-check S0 N ground-non-number?) #t)
+        ((symbolo-numbero-fail-check S0 Y N) #t)
+        ((=/=-fail-check S0 D) #t)
+        ((absento-fail-check S0 T) #t)
+        (else #f)))))
 
 (define eigen-absento-fail-check
   (lambda (E S0)
@@ -757,7 +838,7 @@
              (N (walk* (c->N c) S))
              (T (walk* (c->T c) S)))
         (let ((v (walk* x S)))
-          (let ((R (reify-S v empty-subst)))
+          (let ((R (reify-S v (subst empty-subst-map nonlocal-scope))))
             (reify+ v R
                     (let ((D (remp
                               (lambda (d)
@@ -852,7 +933,7 @@
     (cond
       ((null? d*) #f)
       (else
-        (let* ((S (unify* d empty-subst))
+        (let* ((S (unify* d (subst empty-subst-map nonlocal-scope)))
                (S+ (unify* (car d*) S)))
           (or
             (and S+ (subst-eq? S+ S))
@@ -872,7 +953,7 @@
                       (lambda (S0)
                         (cond
                           ((==fail-check B E S0 '() Y N T) #f)
-                          (else (alist-unify* d '())))))
+                          (else (subst-map (alist-unify* d (subst '() nonlocal-scope)))))))
                      (else #f)))
                  D)))))
 
