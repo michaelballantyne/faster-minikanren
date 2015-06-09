@@ -5,11 +5,10 @@
 
 (provide run run*
          == =/=
-         fresh eigen
-         conde conda condu
+         fresh
+         conde
          symbolo numbero ;; not-pairo
          absento
-         project
          (all-defined-out))
 
 ;; extra stuff for racket

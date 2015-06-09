@@ -1,22 +1,3 @@
-empty-subst-map;;; 28 November 02014 WEB
-;;;
-;;; * Fixed missing unquote before E in 'drop-Y-b/c-dup-var'
-;;;
-;;; * Updated 'rem-xx-from-d' to check against other constraints after
-;;; unification, in order to remove redundant disequality constraints
-;;; subsumed by absento constraints.
-
-;;; newer version: Sept. 18 2013 (with eigens)
-;;; Jason Hemann, Will Byrd, and Dan Friedman
-;;; E = (e* . x*)*, where e* is a list of eigens and x* is a list of variables.
-;;; Each e in e* is checked for any of its eigens be in any of its x*.  Then it fails.
-;;; Since eigen-occurs-check is chasing variables, we might as will do a memq instead
-;;; of an eq? when an eigen is found through a chain of walks.  See eigen-occurs-check.
-;;; All the e* must be the eigens created as part of a single eigen.  The reifier just
-;;; abandons E, if it succeeds.  If there is no failure by then, there were no eigen
-;;; violations.
-
-
 
 (define-syntax inc
   (syntax-rules ()
@@ -29,14 +10,9 @@ empty-subst-map;;; 28 November 02014 WEB
 (define-syntax lambdag@
   (syntax-rules (:)
     ((_ (c) e) (lambda (c) e))
-    ((_ (c : B E S) e)
+    ((_ (c : S D Y N T) e)
      (lambda (c)
-       (let ((B (c->B c)) (E (c->E c)) (S (c->S c)))
-         e)))
-    ((_ (c : B E S D Y N T) e)
-     (lambda (c)
-       (let ((B (c->B c)) (E (c->E c)) (S (c->S c)) (D (c->D c))
-	     (Y (c->Y c)) (N (c->N c)) (T (c->T c)))
+       (let ((S (c->S c)) (D (c->D c)) (Y (c->Y c)) (N (c->N c)) (T (c->T c)))
          e)))))
 
 (define rhs
@@ -46,14 +22,6 @@ empty-subst-map;;; 28 November 02014 WEB
 (define lhs
   (lambda (pr)
     (car pr)))
-
-(define eigen-var
-  (lambda ()
-    (vector eigen-tag)))
-
-(define eigen?
-  (lambda (x)
-    (and (vector? x) (eq? (vector-ref x 0) eigen-tag))))
 
 ; The unique value for variables that have not yet been bound to a value
 (define unbound (list 'unbound))
@@ -66,7 +34,7 @@ empty-subst-map;;; 28 November 02014 WEB
 
 (define var?
   (lambda (x)
-    (and (vector? x) (not (eq? (vector-ref x 0) eigen-tag)))))
+    (vector? x)))
 
 ; Creates a new scope that is not scope-eq? to any other scope
 (define new-scope
@@ -125,16 +93,12 @@ empty-subst-map;;; 28 November 02014 WEB
 
 (define empty-subst (subst empty-subst-map 0))
 
-(define empty-c `(()            ; B - bindings
-                  ()            ; E - eigen
-                  ,empty-subst  ; S - substitution
+(define empty-c `(,empty-subst  ; S - substitution
                   ()            ; D - disequality
                   ()            ; Y - symbolo
                   ()            ; N - numbero
                   ()            ; T - absento
                   ))
-
-(define eigen-tag (vector 'eigen-tag))
 
 (define (make-walk my-subst-lookup)
   (define f
@@ -179,7 +143,6 @@ empty-subst-map;;; 28 November 02014 WEB
         ((and (pair? u) (pair? v))
          (let ((s (unify (car u) (car v) s)))
            (and s (unify (cdr u) (cdr v) s))))
-        ((or (eigen? u) (eigen? v)) #f)
         ((equal? u v) s)
         (else #f))))
 
@@ -210,18 +173,6 @@ empty-subst-map;;; 28 November 02014 WEB
 (define alist-unify (make-unify alist-subst-add alist-walk))
 
 
-(define eigen-occurs-check
-  (lambda (e* x s)
-    (let ((x (walk x s)))
-      (cond
-        ((var? x) #f)
-        ((eigen? x) (memq x e*))
-        ((pair? x)
-         (or
-           (eigen-occurs-check e* (car x) s)
-           (eigen-occurs-check e* (cdr x) s)))
-        (else #f)))))
-
 (define empty-f (lambdaf@ () (mzero)))
 
 (define unify*
@@ -244,18 +195,10 @@ empty-subst-map;;; 28 November 02014 WEB
 (define-syntax fresh
   (syntax-rules ()
     ((_ (x ...) g0 g ...)
-     (lambdag@ (c : B E S D Y N T)
+     (lambdag@ (c : S D Y N T)
        (inc
          (let ((x (var (subst-scope S))) ...)
-           (let ((B (append `(,x ...) B)))
-             (bind* (g0 `(,B ,E ,S ,D ,Y ,N ,T)) g ...))))))))
-
-(define-syntax eigen
-  (syntax-rules ()
-    ((_ (x ...) g0 g ...)
-     (lambdag@ (c : B E S)
-       (let ((x (eigen-var)) ...)
-         ((fresh () (eigen-absento `(,x ...) B) g0 g ...) c))))))
+           (bind* (g0 `(,S ,D ,Y ,N ,T)) g ...)))))))
 
 (define-syntax bind*
   (syntax-rules ()
@@ -276,10 +219,10 @@ empty-subst-map;;; 28 November 02014 WEB
      (take n
        (lambdaf@ ()
          ((fresh (q) g0 g ...
-            (lambdag@ (c : B E S D Y N T)
+            (lambdag@ (c : S D Y N T)
               (begin
                 (let ((S (subst-with-scope S nonlocal-scope)))
-                  (let ((z ((reify q) `(,B ,E ,S ,D ,Y ,N ,T))))
+                  (let ((z ((reify q) `(,S ,D ,Y ,N ,T))))
                     (choice z empty-f))))))
           empty-c))))
     ((_ n (q0 q1 q ...) g0 g ...)
@@ -304,12 +247,12 @@ empty-subst-map;;; 28 November 02014 WEB
 (define-syntax conde
   (syntax-rules ()
     ((_ (g0 g ...) (g1 g^ ...) ...)
-     (lambdag@ (c : B E S D Y N T)
+     (lambdag@ (c : S D Y N T)
        (inc
          (let ((S (subst-with-scope S (new-scope))))
            (mplus*
-             (bind* (g0 `(,B ,E ,S ,D ,Y ,N ,T)) g ...)
-             (bind* (g1 `(,B ,E ,S ,D ,Y ,N ,T)) g^ ...) ...)))))))
+             (bind* (g0 `(,S ,D ,Y ,N ,T)) g ...)
+             (bind* (g1 `(,S ,D ,Y ,N ,T)) g^ ...) ...)))))))
 
 (define-syntax mplus*
   (syntax-rules ()
@@ -325,52 +268,11 @@ empty-subst-map;;; 28 November 02014 WEB
       ((c) (choice c f))
       ((c f^) (choice c (lambdaf@ () (mplus (f) f^)))))))
 
-
-(define c->B (lambda (c) (car c)))
-(define c->E (lambda (c) (cadr c)))
-(define c->S (lambda (c) (caddr c)))
-(define c->D (lambda (c) (cadddr c)))
-(define c->Y (lambda (c) (cadddr (cdr c))))
-(define c->N (lambda (c) (cadddr (cddr c))))
-(define c->T (lambda (c) (cadddr (cdddr c))))
-
-(define-syntax conda
-  (syntax-rules ()
-    ((_ (g0 g ...) (g1 g^ ...) ...)
-     (lambdag@ (c)
-       (inc
-         (ifa ((g0 c) g ...)
-              ((g1 c) g^ ...) ...))))))
-
-(define-syntax ifa
-  (syntax-rules ()
-    ((_) (mzero))
-    ((_ (e g ...) b ...)
-     (let loop ((c-inf e))
-       (case-inf c-inf
-         (() (ifa b ...))
-         ((f) (inc (loop (f))))
-         ((a) (bind* c-inf g ...))
-         ((a f) (bind* c-inf g ...)))))))
-
-(define-syntax condu
-  (syntax-rules ()
-    ((_ (g0 g ...) (g1 g^ ...) ...)
-     (lambdag@ (c)
-       (inc
-         (ifu ((g0 c) g ...)
-              ((g1 c) g^ ...) ...))))))
-
-(define-syntax ifu
-  (syntax-rules ()
-    ((_) (mzero))
-    ((_ (e g ...) b ...)
-     (let loop ((c-inf e))
-       (case-inf c-inf
-         (() (ifu b ...))
-         ((f) (inc (loop (f))))
-         ((c) (bind* c-inf g ...))
-         ((c f) (bind* (unit c) g ...)))))))
+(define c->S (lambda (c) (car c)))
+(define c->D (lambda (c) (cadr c)))
+(define c->Y (lambda (c) (caddr c)))
+(define c->N (lambda (c) (cadddr c)))
+(define c->T (lambda (c) (cadddr (cdr c))))
 
 (define mzero (lambda () #f))
 
@@ -388,13 +290,6 @@ empty-subst-map;;; 28 November 02014 WEB
       (and (var? t^)
            (not (exists in-type? Y))
            (not (exists in-type? N))))))
-
-(define-syntax project
-  (syntax-rules ()
-    ((_ (x ...) g g* ...)
-     (lambdag@ (c : B E S)
-       (let ((x (walk* x S)) ...)
-         ((fresh () g g* ...) c))))))
 
 (define walk*
   (lambda (v S)
@@ -452,14 +347,6 @@ empty-subst-map;;; 28 November 02014 WEB
            (anyvar? (cdr u) r)))
       (else (var? (walk u r))))))
 
-(define anyeigen?
-  (lambda (u r)
-    (cond
-      ((pair? u)
-       (or (anyeigen? (car u) r)
-           (anyeigen? (cdr u) r)))
-      (else (eigen? (walk u r))))))
-
 (define member*
   (lambda (u v)
     (cond
@@ -469,21 +356,21 @@ empty-subst-map;;; 28 November 02014 WEB
       (else #f))))
 
 (define drop-N-b/c-const
-  (lambdag@ (c : B E S D Y N T)
+  (lambdag@ (c : S D Y N T)
     (let ((const? (lambda (n)
                     (not (var? (walk n S))))))
       (cond
         ((find const? N) =>
-         (lambda (n) `(,B ,E ,S ,D ,Y ,(remq1 n N) ,T)))
+         (lambda (n) `(,S ,D ,Y ,(remq1 n N) ,T)))
         (else c)))))
 
 (define drop-Y-b/c-const
-  (lambdag@ (c : B E S D Y N T)
+  (lambdag@ (c : S D Y N T)
     (let ((const? (lambda (y)
                     (not (var? (walk y S))))))
       (cond
 	((find const? Y) =>
-         (lambda (y) `(,B ,E ,S ,D ,(remq1 y Y) ,N ,T)))
+         (lambda (y) `(,S ,D ,(remq1 y Y) ,N ,T)))
         (else c)))))
 
 (define remq1
@@ -515,18 +402,18 @@ empty-subst-map;;; 28 November 02014 WEB
                  (else (loop (cdr set^))))))))))))
 
 (define drop-N-b/c-dup-var
-  (lambdag@ (c : B E S D Y N T)
+  (lambdag@ (c : S D Y N T)
     (cond
       (((find-dup same-var? S) N) =>
-       (lambda (n) `(,B ,E ,S ,D ,Y ,(remq1 n N) ,T)))
+       (lambda (n) `(,S ,D ,Y ,(remq1 n N) ,T)))
       (else c))))
 
 (define drop-Y-b/c-dup-var
-  (lambdag@ (c : B E S D Y N T)
+  (lambdag@ (c : S D Y N T)
     (cond
       (((find-dup same-var? S) Y) =>
        (lambda (y)
-         `(,B ,E ,S ,D ,(remq1 y Y) ,N ,T)))
+         `(,S ,D ,(remq1 y Y) ,N ,T)))
       (else c))))
 
 (define var-type-mismatch?
@@ -580,15 +467,15 @@ empty-subst-map;;; 28 November 02014 WEB
         (else (symbol? y))))))
 
 (define drop-T-b/c-Y-and-N
-  (lambdag@ (c : B E S D Y N T)
+  (lambdag@ (c : S D Y N T)
     (let ((drop-t? (T-term-ununifiable? S Y N)))
       (cond
         ((find (lambda (t) ((drop-t? (lhs t)) (rhs t))) T) =>
-         (lambda (t) `(,B ,E ,S ,D ,Y ,N ,(remq1 t T))))
+         (lambda (t) `(,S ,D ,Y ,N ,(remq1 t T))))
         (else c)))))
 
 (define move-T-to-D-b/c-t2-atom
-  (lambdag@ (c : B E S D Y N T)
+  (lambdag@ (c : S D Y N T)
     (cond
       ((exists (lambda (t)
                (let ((t2^ (walk (rhs t) S)))
@@ -596,7 +483,7 @@ empty-subst-map;;; 28 November 02014 WEB
                    ((and (not (untyped-var? S Y N t2^))
                          (not (pair? t2^)))
                     (let ((T (remq1 t T)))
-                      `(,B ,E ,S ((,t) . ,D) ,Y ,N ,T)))
+                      `(,S ((,t) . ,D) ,Y ,N ,T)))
                    (else #f))))
              T))
       (else c))))
@@ -633,7 +520,7 @@ empty-subst-map;;; 28 November 02014 WEB
           (else #f))))))
 
 (define drop-from-D-b/c-T
-  (lambdag@ (c : B E S D Y N T)
+  (lambdag@ (c : S D Y N T)
     (cond
       ((find
            (lambda (d)
@@ -641,11 +528,11 @@ empty-subst-map;;; 28 November 02014 WEB
                  (T-superfluous-pr? S Y N T)
                d))
          D) =>
-         (lambda (d) `(,B ,E ,S ,(remq1 d D) ,Y ,N ,T)))
+         (lambda (d) `(,S ,(remq1 d D) ,Y ,N ,T)))
       (else c))))
 
 (define drop-t-b/c-t2-occurs-t1
-  (lambdag@ (c : B E S D Y N T)
+  (lambdag@ (c : S D Y N T)
     (cond
       ((find (lambda (t)
                (let ((t-a^ (walk (lhs t) S))
@@ -653,11 +540,11 @@ empty-subst-map;;; 28 November 02014 WEB
                  (mem-check t-d^ t-a^ S)))
              T) =>
              (lambda (t)
-               `(,B ,E ,S ,D ,Y ,N ,(remq1 t T))))
+               `(,S ,D ,Y ,N ,(remq1 t T))))
       (else c))))
 
 (define split-t-move-to-d-b/c-pair
-  (lambdag@ (c : B E S D Y N T)
+  (lambdag@ (c : S D Y N T)
     (cond
       ((exists
          (lambda (t)
@@ -666,7 +553,7 @@ empty-subst-map;;; 28 November 02014 WEB
                ((pair? t2^) (let ((ta `(,(lhs t) . ,(car t2^)))
                                   (td `(,(lhs t) . ,(cdr t2^))))
                               (let ((T `(,ta ,td . ,(remq1 t T))))
-                                `(,B ,E ,S ((,t) . ,D) ,Y ,N ,T))))
+                                `(,S ((,t) . ,D) ,Y ,N ,T))))
                (else #f))))
          T))
       (else c))))
@@ -682,10 +569,10 @@ empty-subst-map;;; 28 November 02014 WEB
        D))))
 
 (define drop-D-b/c-Y-or-N
-  (lambdag@ (c : B E S D Y N T)
+  (lambdag@ (c : S D Y N T)
     (cond
       (((find-d-conflict S Y N) D) =>
-       (lambda (d) `(,B ,E ,S ,(remq1 d D) ,Y ,N ,T)))
+       (lambda (d) `(,S ,(remq1 d D) ,Y ,N ,T)))
       (else c))))
 
 (define cycle
@@ -705,17 +592,10 @@ empty-subst-map;;; 28 November 02014 WEB
 
 (define absento
   (lambda (u v)
-    (lambdag@ (c : B E S D Y N T)
+    (lambdag@ (c : S D Y N T)
       (cond
         [(mem-check u v S) (mzero)]
-        [else (unit `(,B ,E ,S ,D ,Y ,N ((,u . ,v) . ,T)))]))))
-
-(define eigen-absento
-  (lambda (e* x*)
-    (lambdag@ (c : B E S D Y N T)
-      (cond
-        [(eigen-occurs-check e* x* S) (mzero)]
-        [else (unit `(,B ((,e* . ,x*) . ,E) ,S ,D ,Y ,N ,T))]))))
+        [else (unit `(,S ,D ,Y ,N ((,u . ,v) . ,T)))]))))
 
 (define mem-check
   (lambda (u t S)
@@ -742,7 +622,7 @@ empty-subst-map;;; 28 November 02014 WEB
         (cond
           ((var? u) #f)
           (else (not (pred u))))))))
-;; moved
+
 (define ground-non-symbol?
   (ground-non-<type>? symbol?))
 
@@ -751,41 +631,40 @@ empty-subst-map;;; 28 November 02014 WEB
 
 (define symbolo
   (lambda (u)
-    (lambdag@ (c : B E S D Y N T)
+    (lambdag@ (c : S D Y N T)
       (cond
         [(ground-non-symbol? u S) (mzero)]
         [(mem-check u N S) (mzero)]
-        [else (unit `(,B ,E ,S ,D (,u . ,Y) ,N ,T))]))))
+        [else (unit `(,S ,D (,u . ,Y) ,N ,T))]))))
 
 (define numbero
   (lambda (u)
-    (lambdag@ (c : B E S D Y N T)
+    (lambdag@ (c : S D Y N T)
       (cond
         [(ground-non-number? u S) (mzero)]
         [(mem-check u Y S) (mzero)]
-        [else (unit `(,B ,E ,S ,D ,Y (,u . ,N) ,T))]))))
-;; end moved
+        [else (unit `(,S ,D ,Y (,u . ,N) ,T))]))))
 
-(define =/= ;; moved
+(define =/=
   (lambda (u v)
-    (lambdag@ (c : B E S D Y N T)
+    (lambdag@ (c : S D Y N T)
       (cond
         ((unify u v (subst-with-scope S nonlocal-scope)) =>
          (lambda (S+)
            (if (subst-map-eq? (subst-map S+) (subst-map S))
              (mzero)
-             (unit `(,B ,E ,S (((,u . ,v)) . ,D) ,Y ,N ,T)))))
+             (unit `(,S (((,u . ,v)) . ,D) ,Y ,N ,T)))))
         (else c)))))
 
 (define ==
   (lambda (u v)
-    (lambdag@ (c : B E S D Y N T)
+    (lambdag@ (c : S D Y N T)
       (cond
         ((unify u v S) =>
          (lambda (S0)
            (cond
-             ((==fail-check B E S0 D Y N T) (mzero))
-             (else (unit `(,B ,E ,S0 ,D ,Y ,N ,T))))))
+             ((==fail-check S0 D Y N T) (mzero))
+             (else (unit `(,S0 ,D ,Y ,N ,T))))))
         (else (mzero))))))
 
 (define succeed (== #f #f))
@@ -793,20 +672,15 @@ empty-subst-map;;; 28 November 02014 WEB
 (define fail (== #f #t))
 
 (define ==fail-check
-  (lambda (B E S0 D Y N T)
+  (lambda (S0 D Y N T)
     (let ([S0 (subst-with-scope S0 nonlocal-scope)])
       (cond
-        ((eigen-absento-fail-check E S0) #t)
         ((atomic-fail-check S0 Y ground-non-symbol?) #t)
         ((atomic-fail-check S0 N ground-non-number?) #t)
         ((symbolo-numbero-fail-check S0 Y N) #t)
         ((=/=-fail-check S0 D) #t)
         ((absento-fail-check S0 T) #t)
         (else #f)))))
-
-(define eigen-absento-fail-check
-  (lambda (E S0)
-    (exists (lambda (e*/x*) (eigen-occurs-check (car e*/x*) (cdr e*/x*) S0)) E)))
 
 (define atomic-fail-check
   (lambda (S A pred)
@@ -849,9 +723,7 @@ empty-subst-map;;; 28 November 02014 WEB
                     (let ((D (remp
                               (lambda (d)
                                 (let ((dw (walk* d S)))
-                                  (or
-                                    (anyvar? dw R)
-                                    (anyeigen? dw R))))
+                                  (anyvar? dw R)))
                                (rem-xx-from-d c))))
                       (rem-subsumed D))
                     (remp
@@ -861,7 +733,7 @@ empty-subst-map;;; 28 November 02014 WEB
                      (lambda (n) (var? (walk n R)))
                      N)
                     (remp (lambda (t)
-                            (or (anyeigen? t R) (anyvar? t R))) T)))))))))
+                            (anyvar? t R)) T)))))))))
 
 (define reify+
   (lambda (v R D Y N T)
@@ -950,7 +822,7 @@ empty-subst-map;;; 28 November 02014 WEB
     (alist-unify (map lhs S+) (map rhs S+) S)))
 
 (define rem-xx-from-d
-  (lambdag@ (c : B E S D Y N T)
+  (lambdag@ (c : S D Y N T)
     (let ((D (walk* D S)))
       (remp not
             (map (lambda (d)
@@ -958,7 +830,7 @@ empty-subst-map;;; 28 November 02014 WEB
                      ((unify* d S) =>
                       (lambda (S0)
                         (cond
-                          ((==fail-check B E S0 '() Y N T) #f)
+                          ((==fail-check S0 '() Y N T) #f)
                           (else (subst-map (alist-unify* d (subst '() nonlocal-scope)))))))
                      (else #f)))
                  D)))))
