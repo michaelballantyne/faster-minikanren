@@ -59,8 +59,10 @@ empty-subst-map;;; 28 November 02014 WEB
 (define unbound (list 'unbound))
 
 (define var
-  (lambda (scope)
-    (vector unbound scope)))
+  (let ((counter -1))
+    (lambda (scope)
+      (set! counter (+ 1 counter))
+      (vector unbound scope counter))))
 
 (define var?
   (lambda (x)
@@ -79,6 +81,10 @@ empty-subst-map;;; 28 November 02014 WEB
 (define scope-eq? eq?)
 
 (define var-eq? eq?)
+
+(define var-id
+  (lambda (x)
+    (vector-ref x 2)))
 
 (define var-scope
   (lambda (x)
