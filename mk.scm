@@ -1,40 +1,8 @@
-
-(define-syntax inc
-  (syntax-rules ()
-    ((_ e) (lambdaf@ () e))))
-
-(define-syntax lambdaf@
-  (syntax-rules ()
-    ((_ () e) (lambda () e))))
-
-(define-syntax lambdag@
-  (syntax-rules (:)
-    ((_ (c) e) (lambda (c) e))
-    ((_ (c : S D Y N T) e)
-     (lambda (c)
-       (let ((S (c->S c)) (D (c->D c)) (Y (c->Y c)) (N (c->N c)) (T (c->T c)))
-         e)))))
-
-(define rhs
-  (lambda (pr)
-    (cdr pr)))
-
-(define lhs
-  (lambda (pr)
-    (car pr)))
-
-; The unique value for variables that have not yet been bound to a value
-(define unbound (list 'unbound))
-
-(define var
-  (let ((counter -1))
-    (lambda (scope)
-      (set! counter (+ 1 counter))
-      (vector unbound scope counter))))
-
-(define var?
-  (lambda (x)
-    (vector? x)))
+; Scope object.
+; Used to determine whether a branch has occured between variable creation
+; and unification to allow the set-var-val! optimization in subst-add. Both variables
+; and substitutions will contain a scope. When a substitution flows through a
+; conde it is assigned a new scope.
 
 ; Creates a new scope that is not scope-eq? to any other scope
 (define new-scope
@@ -48,15 +16,31 @@
 
 (define scope-eq? eq?)
 
+
+; Logic variable object.
+; Contains:
+;   val - value for variable assigned by unification using set-var-val! optimization.
+;           unbound if not yet set or stored in substitution.
+;   scope - scope that the variable was created in.
+;   idx - unique numeric index for the variable. Used by the trie substitution representation.
+; Variable objects are compared by object identity.
+
+; The unique val for variables that have not yet been bound to a value
+; or are bound in the substitution
+(define unbound (list 'unbound))
+
+(define var
+  (let ((counter -1))
+    (lambda (scope)
+      (set! counter (+ 1 counter))
+      (vector unbound scope counter))))
+
+; Vectors are not allowed as terms, so terms that are vectors are variables.
+(define var?
+  (lambda (x)
+    (vector? x)))
+
 (define var-eq? eq?)
-
-(define var-id
-  (lambda (x)
-    (vector-ref x 2)))
-
-(define var-scope
-  (lambda (x)
-    (vector-ref x 1)))
 
 (define var-val
   (lambda (x)
@@ -65,6 +49,22 @@
 (define set-var-val!
   (lambda (x v)
     (vector-set! x 0 v)))
+
+(define var-scope
+  (lambda (x)
+    (vector-ref x 1)))
+
+(define var-idx
+  (lambda (x)
+    (vector-ref x 2)))
+
+
+; Substitution object.
+; Contains:
+;   map - mapping of variables to values
+;   scope - scope at current program point, for set-var-val! optimization. Updated at conde.
+;               Included in the substitution because it is required to fully define the substitution
+;               and how it is to be extended.
 
 (define subst
   (lambda (mapping scope)
@@ -82,102 +82,140 @@
   (lambda (s)
     (subst-map-length (subst-map s))))
 
-(define subst-eq?
-  (lambda (s1 s2)
-    (and (scope-eq? (subst-scope s1) (subst-scope s2))
-         (subst-map-eq? (subst-map s1) (subst-map s2)))))
-
 (define subst-with-scope
   (lambda (s new-scope)
     (subst (subst-map s) new-scope)))
 
 (define empty-subst (subst empty-subst-map 0))
 
-(define empty-c `(,empty-subst  ; S - substitution
-                  ()            ; D - disequality
-                  ()            ; Y - symbolo
-                  ()            ; N - numbero
-                  ()            ; T - absento
-                  ))
-
-(define (make-walk my-subst-lookup)
-  (define f
-    (lambda (u S)
-      (if (var? u)
-        (if (eq? (var-val u) unbound)
-          (cond
-            ((my-subst-lookup u (subst-map S)) =>
-                                               (lambda (pr) (f (rhs pr) S)))
-            (else u))
-          (f (var-val u) S))
-        u)))
-  f)
-
-(define walk (make-walk subst-map-lookup))
-
-(define (make-unify ext-s mywalk)
-  (define occurs-check
-    (lambda (x v s)
-      (let ((v (mywalk v s)))
-        (cond
-          ((var? v) (var-eq? v x))
-          ((pair? v)
-           (or
-             (occurs-check x (car v) s)
-             (occurs-check x (cdr v) s)))
-          (else #f)))))
-
-  (define ext-s-check
-    (lambda (x v s)
-      (cond
-        ((occurs-check x v s) #f)
-        (else (ext-s s x v)))))
-
-  (define (unify u v s)
-    (let ((u (mywalk u s))
-          (v (mywalk v s)))
-      (cond
-        ((eq? u v) s)
-        ((var? u) (ext-s-check u v s))
-        ((var? v) (ext-s-check v u s))
-        ((and (pair? u) (pair? v))
-         (let ((s (unify (car u) (car v) s)))
-           (and s (unify (cdr u) (cdr v) s))))
-        ((equal? u v) s)
-        (else #f))))
-
-  unify)
-
 (define subst-add
   (lambda (S x v)
+    ; set-var-val! optimization: set the value directly on the variable
+    ; object if we haven't branched since its creation
+    ; (the scope of the variable and the substitution are the same).
+    ; Otherwise extend the substitution mapping.
     (if (scope-eq? (var-scope x) (subst-scope S))
       (begin
         (set-var-val! x v)
         S)
       (subst (subst-map-add (subst-map S) x v) (subst-scope S)))))
 
-(define unify (make-unify subst-add walk))
+; Association object.
+; Describes an association mapping the lhs to the rhs. Returned by unification
+; to describe the associations that were added to the substitution (whose representation
+; is opaque) and used to represent disequality constraints.
+
+(define rhs
+  (lambda (pr)
+    (cdr pr)))
+
+(define lhs
+  (lambda (pr)
+    (car pr)))
 
 
-; Variant of unification used for simplifying disequality constraints.
+; Constraint record object.
+; Contains:
+;   T - type constraint. 'symbolo 'numbero or #f to indicate no constraint
+;   D - list of disequality constraints. Each disequality is a list of associations.
+;           The constraint is violated if all associated variables are equal in the
+;           substitution simultaneously.
+;   A - list of absento constraints. Each constraint is an association with the absent
+;           atom on the left and a boolean on the right indicating whether the constraint
+;           still needs to be enforced or has already been pushed down onto components
+;           of a structure.
 
-(define alist-walk (make-walk assq))
-
-(define alist-subst-map-add
-  (lambda (S var val) (cons (cons var val) S)))
-
-(define alist-subst-add
-  (lambda (S x v)
-    (subst (alist-subst-map-add (subst-map S) x v) (subst-scope S))))
-
-(define alist-unify (make-unify alist-subst-add alist-walk))
+(define empty-c-rec `(#f '() '()))
 
 
-(define empty-f (lambdaf@ () (mzero)))
+; Constraint store object.
+; Mapping of representative variable to constraint record. Constraints are
+; always on the representative element and must be moved / merged when that
+; element changes.
+
+(define empty-c (hasheq))
+
+
+; State object.
+; The state is the value that is monadically passed through the search.
+; Contains:
+;   S - the substitution
+;   C - the constraint store
+
+(define st
+  (lambda (S C)
+    (cons S C)))
+
+(define st->S (lambda (st) (car c)))
+(define st->C (lambda (st) (cdr c)))
+
+(define empty-st (st empty-subst empty-c))
+
+
+
+(define walk
+  (lambda (u smap)
+    (if (var? u)
+      (if (eq? (var-val u) unbound)
+        (cond
+          ((subst-lookup u smap) =>
+             (lambda (pr) (walk (rhs pr) smap)))
+          (else u))
+        (walk (var-val u) smap))
+      u)))
+
+(define occurs-check
+  (lambda (x v s)
+    (let ((v (walk v (subst-map s))))
+      (cond
+        ((var? v) (var-eq? v x))
+        ((pair? v)
+         (or
+           (occurs-check x (car v) s)
+           (occurs-check x (cdr v) s)))
+        (else #f)))))
+
+(define ext-s-check
+  (lambda (x v s)
+    (cond
+      ((occurs-check x v s) (values #f #f))
+      (else (values (subst-add s x v) `((,x . ,v)))))))
+
+(define (unify u v s)
+  (let ((u (walk u (subst-map s)))
+        (v (walk v (subst-map s))))
+    (cond
+      ((eq? u v) (values s '()))
+      ((var? u) (ext-s-check u v s))
+      ((var? v) (ext-s-check v u s))
+      ((and (pair? u) (pair? v))
+       (let-values (((s added-car) (unify (car u) (car v) s)))
+         (if s
+           (let-values (((s added-cdr) (unify (cdr u) (cdr v) s)))
+             (values s (append added-car added-cdr)))
+           (values #f #f))))
+      ((equal? u v) (values s '()))
+      (else #f))))
 
 (define unify*
   (lambda (S+ S)
     (unify (map lhs S+) (map rhs S+) S)))
+
+
+
+(define-syntax inc
+  (syntax-rules ()
+    ((_ e) (lambdaf@ () e))))
+
+(define-syntax lambdaf@
+  (syntax-rules ()
+    ((_ () e) (lambda () e))))
+
+(define-syntax lambdag@
+  (syntax-rules ()
+    ((_ (st) e) (lambda (st) e))))
+
+(define empty-f (lambdaf@ () (mzero)))
 
 (define-syntax case-inf
   (syntax-rules ()
@@ -195,10 +233,10 @@
 (define-syntax fresh
   (syntax-rules ()
     ((_ (x ...) g0 g ...)
-     (lambdag@ (c : S D Y N T)
+     (lambdag@ (S C)
        (inc
          (let ((x (var (subst-scope S))) ...)
-           (bind* (g0 `(,S ,D ,Y ,N ,T)) g ...)))))))
+           (bind* (g0 S C) g ...)))))))
 
 (define-syntax bind*
   (syntax-rules ()
@@ -268,11 +306,6 @@
       ((c) (choice c f))
       ((c f^) (choice c (lambdaf@ () (mplus (f) f^)))))))
 
-(define c->S (lambda (c) (car c)))
-(define c->D (lambda (c) (cadr c)))
-(define c->Y (lambda (c) (caddr c)))
-(define c->N (lambda (c) (cadddr c)))
-(define c->T (lambda (c) (cadddr (cdr c))))
 
 (define mzero (lambda () #f))
 
