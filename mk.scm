@@ -10,7 +10,8 @@
     (list 'scope)))
 
 ; Scope used when variable bindings should always be made in the substitution,
-; as in var=? and reification.
+; as in disequality solving and reification. We don't want to set-var-val! a
+; variable when checking if a disequality constraint holds!
 (define nonlocal-scope
   (list 'non-local-scope))
 
@@ -70,23 +71,19 @@
   (lambda (mapping scope)
     (cons mapping scope)))
 
-(define subst-map
-  (lambda (s)
-    (car s)))
+(define subst-map car)
 
-(define subst-scope
-  (lambda (s)
-    (cdr s)))
+(define subst-scope cdr)
 
 (define subst-length
-  (lambda (s)
-    (subst-map-length (subst-map s))))
+  (lambda (S)
+    (subst-map-length (subst-map S))))
 
 (define subst-with-scope
-  (lambda (s new-scope)
-    (subst (subst-map s) new-scope)))
+  (lambda (S new-scope)
+    (subst (subst-map S) new-scope)))
 
-(define empty-subst (subst empty-subst-map 0))
+(define empty-subst (subst empty-subst-map (new-scope)))
 
 (define subst-add
   (lambda (S x v)
@@ -100,33 +97,64 @@
         S)
       (subst (subst-map-add (subst-map S) x v) (subst-scope S)))))
 
+(define subst-lookup
+  (lambda (u S)
+    ; set-var-val! optimization.
+    ; Tried checking the scope here to avoid a subst-map-lookup
+    ; if it was definitely unbound, but that was slower.
+    (if (not (eq? (var-val u) unbound))
+      (var-val u)
+      (subst-map-lookup u (subst-map S)))))
+
 ; Association object.
 ; Describes an association mapping the lhs to the rhs. Returned by unification
 ; to describe the associations that were added to the substitution (whose representation
 ; is opaque) and used to represent disequality constraints.
 
-(define rhs
-  (lambda (pr)
-    (cdr pr)))
+(define lhs car)
 
-(define lhs
-  (lambda (pr)
-    (car pr)))
-
+(define rhs cdr)
 
 ; Constraint record object.
+;
+; Describes the constraints attached to a single variable.
+;
 ; Contains:
 ;   T - type constraint. 'symbolo 'numbero or #f to indicate no constraint
 ;   D - list of disequality constraints. Each disequality is a list of associations.
 ;           The constraint is violated if all associated variables are equal in the
-;           substitution simultaneously.
-;   A - list of absento constraints. Each constraint is an association with the absent
-;           atom on the left and a boolean on the right indicating whether the constraint
-;           still needs to be enforced or has already been pushed down onto components
-;           of a structure.
+;           substitution simultaneously. D could contain duplicate constraints (created
+;           by distinct =/= calls). A given disequality constraint is only attached to
+;           one of the variables involved, as all components of the constraint must be
+;           violated to cause failure.
+;   A - list of absento constraints. Each constraint is a ground atom. The list contains
+;           no duplicates.
 
-(define empty-c-rec `(#f '() '()))
+(define empty-c-rec `(#f () ()))
 
+(define c-rec-T
+  (lambda (c-rec)
+    (car c-rec)))
+
+(define c-rec-D
+  (lambda (c-rec)
+    (cadr c-rec)))
+
+(define c-rec-A
+  (lambda (c-rec)
+    (caddr c-rec)))
+
+(define c-rec-with-T
+  (lambda (c-rec T)
+    (list T (c-rec-D c-rec) (c-rec-A c-rec))))
+
+(define c-rec-with-D
+  (lambda (c-rec D)
+    (list (c-rec-T c-rec) D (c-rec-A c-rec))))
+
+(define c-rec-with-A
+  (lambda (c-rec A)
+    (list (c-rec-T c-rec) (c-rec-D c-rec) A)))
 
 ; Constraint store object.
 ; Mapping of representative variable to constraint record. Constraints are
@@ -142,48 +170,52 @@
 ;   S - the substitution
 ;   C - the constraint store
 
-(define st
+(define state
   (lambda (S C)
     (cons S C)))
 
-(define st->S (lambda (st) (car c)))
-(define st->C (lambda (st) (cdr c)))
+(define state-S (lambda (st) (car st)))
+(define state-C (lambda (st) (cdr st)))
 
-(define empty-st (st empty-subst empty-c))
+(define empty-state (state empty-subst empty-c))
 
 
+; Unification
 
 (define walk
-  (lambda (u smap)
+  (lambda (u S)
     (if (var? u)
-      (if (eq? (var-val u) unbound)
-        (cond
-          ((subst-lookup u smap) =>
-             (lambda (pr) (walk (rhs pr) smap)))
-          (else u))
-        (walk (var-val u) smap))
+      (let ((val (subst-lookup u S)))
+        (if (eq? val unbound)
+          u
+          (walk val S)))
       u)))
 
 (define occurs-check
-  (lambda (x v s)
-    (let ((v (walk v (subst-map s))))
+  (lambda (x v S)
+    (let ((v (walk v S)))
       (cond
         ((var? v) (var-eq? v x))
         ((pair? v)
          (or
-           (occurs-check x (car v) s)
-           (occurs-check x (cdr v) s)))
+           (occurs-check x (car v) S)
+           (occurs-check x (cdr v) S)))
         (else #f)))))
 
 (define ext-s-check
-  (lambda (x v s)
+  (lambda (x v S)
     (cond
-      ((occurs-check x v s) (values #f #f))
-      (else (values (subst-add s x v) `((,x . ,v)))))))
+      ((occurs-check x v S) (values #f #f))
+      (else (values (subst-add S x v) `((,x . ,v)))))))
 
+; Returns as values the extended substitution and a list of associations added
+; during the unification, or (values #f #f) if the unification failed.
+;
+; Right now appends the list of added values from sub-unifications. Alternatively
+; could be threaded monadically, which could be faster or slower.
 (define (unify u v s)
-  (let ((u (walk u (subst-map s)))
-        (v (walk v (subst-map s))))
+  (let ((u (walk u s))
+        (v (walk v s)))
     (cond
       ((eq? u v) (values s '()))
       ((var? u) (ext-s-check u v s))
@@ -195,27 +227,29 @@
              (values s (append added-car added-cdr)))
            (values #f #f))))
       ((equal? u v) (values s '()))
-      (else #f))))
+      (else (values #f #f)))))
 
 (define unify*
   (lambda (S+ S)
     (unify (map lhs S+) (map rhs S+) S)))
 
 
+; Search
+
+; Search result types. Names inspired by the plus monad?
+(define mzero (lambda () #f))
+(define unit (lambda (c) c))
+(define choice (lambda (c f) (cons c f)))
 
 (define-syntax inc
   (syntax-rules ()
-    ((_ e) (lambdaf@ () e))))
+    ((_ e) (lambda () e))))
 
-(define-syntax lambdaf@
-  (syntax-rules ()
-    ((_ () e) (lambda () e))))
+(define empty-f (inc (mzero)))
 
 (define-syntax lambdag@
   (syntax-rules ()
     ((_ (st) e) (lambda (st) e))))
-
-(define empty-f (lambdaf@ () (mzero)))
 
 (define-syntax case-inf
   (syntax-rules ()
@@ -233,10 +267,11 @@
 (define-syntax fresh
   (syntax-rules ()
     ((_ (x ...) g0 g ...)
-     (lambdag@ (S C)
+     (lambdag@ (st)
        (inc
-         (let ((x (var (subst-scope S))) ...)
-           (bind* (g0 S C) g ...)))))))
+         (let ((scope (subst-scope (state-S st))))
+           (let ((x (var scope)) ...)
+             (bind* (g0 st) g ...))))))))
 
 (define-syntax bind*
   (syntax-rules ()
@@ -249,20 +284,19 @@
       (() (mzero))
       ((f) (inc (bind (f) g)))
       ((c) (g c))
-      ((c f) (mplus (g c) (lambdaf@ () (bind (f) g)))))))
+      ((c f) (mplus (g c) (inc (bind (f) g)))))))
 
 (define-syntax run
   (syntax-rules ()
     ((_ n (q) g0 g ...)
      (take n
-       (lambdaf@ ()
+       (inc
          ((fresh (q) g0 g ...
-            (lambdag@ (c : S D Y N T)
-              (begin
-                (let ((S (subst-with-scope S nonlocal-scope)))
-                  (let ((z ((reify q) `(,S ,D ,Y ,N ,T))))
-                    (choice z empty-f))))))
-          empty-c))))
+            #;(lambdag@ (st)
+              (let ((S (subst-with-scope (state-S st) nonlocal-scope)))
+                (let ((z ((reify q) (state S (state-C st)))))
+                  (choice z empty-f)))))
+          empty-state))))
     ((_ n (q0 q1 q ...) g0 g ...)
      (run n (x) (fresh (q0 q1 q ...) g0 g ... (== `(,q0 ,q1 ,q ...) x))))))
 
@@ -285,18 +319,19 @@
 (define-syntax conde
   (syntax-rules ()
     ((_ (g0 g ...) (g1 g^ ...) ...)
-     (lambdag@ (c : S D Y N T)
+     (lambdag@ (st)
        (inc
-         (let ((S (subst-with-scope S (new-scope))))
+         (let* ((S (subst-with-scope (state-S st) (new-scope)))
+                (st (state S (state-C st))))
            (mplus*
-             (bind* (g0 `(,S ,D ,Y ,N ,T)) g ...)
-             (bind* (g1 `(,S ,D ,Y ,N ,T)) g^ ...) ...)))))))
+             (bind* (g0 st) g ...)
+             (bind* (g1 st) g^ ...) ...)))))))
 
 (define-syntax mplus*
   (syntax-rules ()
     ((_ e) e)
     ((_ e0 e ...) (mplus e0
-                    (lambdaf@ () (mplus* e ...))))))
+                    (inc (mplus* e ...))))))
 
 (define mplus
   (lambda (c-inf f)
@@ -304,14 +339,182 @@
       (() (f))
       ((f^) (inc (mplus (f) f^)))
       ((c) (choice c f))
-      ((c f^) (choice c (lambdaf@ () (mplus (f) f^)))))))
+      ((c f^) (choice c (inc (mplus (f) f^)))))))
 
 
-(define mzero (lambda () #f))
+; Constraints
 
-(define unit (lambda (c) c))
+; Requirements for type constraints:
+; 1. Must be positive, not negative. not-pairo wouldn't work.
+; 2. Each type must have infinitely many possible values to avoid
+;      incorrectness in combination with disequality constraints, like:
+;      (fresh (x) (booleano x) (=/= x #t) (=/= x #f))
+(define type-constraint
+  (lambda (type-pred type-id)
+    (lambda (u)
+      (lambdag@ (st)
+        (let ((term (walk u (state-S st))))
+          (cond
+            ((type-pred term) (unit st))
+            ((var? term)
+             (let* ((c-rec (hash-ref (state-C st) term empty-c-rec))
+                   (T (c-rec-T c-rec)))
+               (cond
+                 ((eq? T type-id) (unit st))
+                 ((not T)
+                  (let* ((c-rec (c-rec-with-T c-rec type-id))
+                         (C (hash-set (state-C st) term c-rec)))
+                    (unit (state (state-S st) C))))
+                 (else (mzero)))))
+            (else (mzero))))))))
 
-(define choice (lambda (c f) (cons c f)))
+(define symbolo (type-constraint symbol? 'symbolo))
+(define numbero (type-constraint number? 'numbero))
+
+
+(define (add-to-D st v c)
+  (let* ((c-rec (hash-ref (state-C st) v empty-c-rec))
+         (c-rec^ (c-rec-with-D c-rec (cons c (c-rec-D c-rec)))))
+    (state (state-S st) (hash-set (state-C st) v c-rec^))))
+
+
+(define =/=*
+  (lambda (S+)
+    (lambdag@ (st)
+      (let-values (((S added) (unify* S+ (subst-with-scope (state-S st) nonlocal-scope))))
+        (cond
+          ((not S) (unit st))
+          ((null? added) (mzero))
+          (else
+            ; Choose one of the disequality elements (el) to attach the constraint to. Only
+            ; need to choose one because all must fail to cause the constraint to fail.
+            (let ((el (car added)))
+              (let ((st (add-to-D st (car el) added)))
+                (if (var? (cdr el))
+                  (add-to-D st (cdr el) added)
+                  st)))))))))
+
+(define =/=
+  (lambda (u v)
+    (=/=* `((,u . ,v)))))
+
+(define absento
+  (lambda (ground-atom term)
+    (lambdag@ (st)
+      (let ((term (walk term (state-S st))))
+        (cond
+          ((pair? term)
+           (let ((st^ ((absento ground-atom (car term)) st)))
+             (and st^ ((absento ground-atom (cdr term)) st^))))
+          ((eqv? term ground-atom) (mzero))
+          ((var? term)
+           (let* ((c-rec (hash-ref (state-C st) term empty-c-rec))
+                  (A (c-rec-A c-rec)))
+             (if (memv ground-atom A)
+               (unit st)
+               (let ((c-rec^ (c-rec-with-A c-rec (cons ground-atom A))))
+                 (unit (state (state-S st) (hash-set (state-C st) term c-rec^)))))))
+          (else (unit st)))))))
+
+
+(define ==
+  (lambda (u v)
+    (lambdag@ (st)
+      (let-values (((S added) (unify u v (state-S st))))
+        (if S
+          (update-constraints* added (state S (state-C st)))
+          (mzero))))))
+
+; TODO: these functions are pretty similar. In racket I'd use a for/fold
+(define update-constraints*
+  (lambda (added st)
+    (if (null? added)
+      st
+      (let ([st (update-constraints (car added) st)])
+        (and st (update-constraints* (cdr added) st))))))
+
+(define apply-all
+  (lambda (ops st)
+    (if (null? ops)
+      st
+      (let ([st ((car ops) st)])
+        (and st (apply-all (cdr ops) st))))))
+
+; Not fully optimized. Could do absento update with fewer hash-refs / hash-sets,
+; for example.
+(define update-constraints
+  (lambda (a st)
+    (let ([old-c-rec (hash-ref (state-C st) (lhs a) unbound)])
+      (if (eq? old-c-rec unbound)
+        st
+        (let ((st (state (state-S st) (hash-remove (state-C st) (lhs a)))))
+         (apply-all
+          (append
+            (if (eq? (c-rec-T old-c-rec) 'symbolo)
+              (list (symbolo (rhs a)))
+              '())
+            (if (eq? (c-rec-T old-c-rec) 'numbero)
+              (list (numbero (rhs a)))
+              '())
+            (map (lambda (atom) (absento atom (rhs a))) (c-rec-A old-c-rec))
+            (map (lambda (d) (=/=* d)) (c-rec-D old-c-rec)))
+          st))))))
+
+
+
+#|
+
+
+(define apply-type-constraint
+  (lambda (c-rec type)
+    (let ([T (c-rec-T c-rec)])
+      (cond
+        ((eq? T type) c-rec)
+        ((not T) (c-rec-with-T c-rec type))
+        (else #f)))))
+
+(define apply-absento
+  (lambda (c-rec)
+    ))
+
+(define symbolo
+  (lambda (u)
+    (lambdag@ (st)
+      (apply-type-constraint )
+      (cond
+        [(ground-non-symbol? u S) (mzero)]
+        [(mem-check u N S) (mzero)]
+        [else (unit `(,S ,D (,u . ,Y) ,N ,T))]))))
+
+(define numbero
+  (lambda (u)
+    (lambdag@ (c : S D Y N T)
+      (cond
+        [(ground-non-number? u S) (mzero)]
+        [(mem-check u Y S) (mzero)]
+        [else (unit `(,S ,D ,Y (,u . ,N) ,T))]))))
+
+(define absento
+  (lambda (u v)
+    (lambdag@ (c : S D Y N T)
+      (cond
+        [(mem-check u v S) (mzero)]
+        [else (unit `(,S ,D ,Y ,N ((,u . ,v) . ,T)))]))))
+
+
+(define =/=
+  (lambda (u v)
+    (lambdag@ (c : S D Y N T)
+      (cond
+        ((unify u v (subst-with-scope S nonlocal-scope)) =>
+         (lambda (S+)
+           (if (subst-map-eq? (subst-map S+) (subst-map S))
+             (mzero)
+             (unit `(,S (((,u . ,v)) . ,D) ,Y ,N ,T)))))
+        (else c)))))
+
+
+; Bits from the old constraint implementation
 
 (define tagged?
   (lambda (S Y y^)
@@ -662,21 +865,7 @@
 (define ground-non-number?
   (ground-non-<type>? number?))
 
-(define symbolo
-  (lambda (u)
-    (lambdag@ (c : S D Y N T)
-      (cond
-        [(ground-non-symbol? u S) (mzero)]
-        [(mem-check u N S) (mzero)]
-        [else (unit `(,S ,D (,u . ,Y) ,N ,T))]))))
 
-(define numbero
-  (lambda (u)
-    (lambdag@ (c : S D Y N T)
-      (cond
-        [(ground-non-number? u S) (mzero)]
-        [(mem-check u Y S) (mzero)]
-        [else (unit `(,S ,D ,Y (,u . ,N) ,T))]))))
 
 (define =/=
   (lambda (u v)
@@ -900,3 +1089,5 @@
       ,drop-N-b/c-dup-var ,drop-D-b/c-Y-or-N ,drop-T-b/c-Y-and-N
       ,move-T-to-D-b/c-t2-atom ,split-t-move-to-d-b/c-pair
       ,drop-from-D-b/c-T ,drop-t-b/c-t2-occurs-t1)))
+
+|#
