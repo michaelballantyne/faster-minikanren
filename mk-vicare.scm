@@ -1,3 +1,11 @@
+; This file needs to be loaded before mk.scm for Vicare. I can't figure
+; out how to do loads relative to a source file rather than the working
+; directory, else this file would load mk.scm.
+
+
+; Trie implementation, due to Abdulaziz Ghuloum. Used for substitution
+; and constraint store.
+
   ;;; subst ::= (empty)
   ;;;         | (node even odd)
   ;;;         | (data idx val)
@@ -105,6 +113,9 @@
       [(and (data? s*) (fx= (data-idx s*) xi)) '()]
       [else s*])))
 
+
+; Substitution representation
+
 (define empty-subst-map '())
 
 (define subst-map-length t:size)
@@ -113,12 +124,79 @@
 ; This distinguishes between #f indicating absence and being the result.
 (define subst-map-lookup
   (lambda (u S)
-    (let ((res (t:lookup (var-id u) S)))
+    (let ((res (t:lookup (var-idx u) S)))
       (if res
-        (cons u (data-val res))
-        #f))))
+        (data-val res)
+        unbound))))
 
 (define (subst-map-add S var val)
-  (t:bind (var-id var) val S))
+  (t:bind (var-idx var) val S))
 
 (define subst-map-eq? eq?)
+
+
+; Alternative (unused) substitution representation, using alists.
+; Performance with the tries is usually about the same and
+; can be much better for huge substitutions.
+
+#|
+(define empty-subst-map '())
+
+(define subst-map-length length)
+
+; Returns #f if not found, or a pair of u and the result of the lookup.
+; This distinguishes between #f indicating absence and being the result.
+(define subst-map-lookup
+  (lambda (u S)
+    (let ((res (assq u S)))
+      (if res
+        (cdr res)
+        unbound))))
+
+(define (subst-map-add S var val)
+  (cons (cons var val) S))
+
+(define subst-map-eq? eq?)
+|#
+
+
+; Constraint store representation
+
+(define empty-C '())
+
+(define set-c
+  (lambda (v c st)
+    (state (state-S st) (t:bind (var-idx v) c (state-C st)))))
+
+(define lookup-c
+  (lambda (v st)
+    (let ((res (t:lookup (var-idx v) (state-C st))))
+      (if res
+        (data-val res)
+        empty-c))))
+
+; t:unbind either is buggy or doesn't do what I would expect, so
+; I implement remove by setting the value to the empty constraint record.
+(define remove-c
+  (lambda (v st)
+    (let ((res (t:bind (var-idx v) empty-c (state-C st))))
+      (state (state-S st) res))))
+
+
+; Misc. missing functions
+
+(define (remove-duplicates l)
+  (cond ((null? l)
+         '())
+        ((member (car l) (cdr l))
+         (remove-duplicates (cdr l)))
+        (else
+         (cons (car l) (remove-duplicates (cdr l))))))
+
+(define (foldl f init seq)
+  (if (null? seq)
+    init
+    (foldl f
+           (f (car seq) init)
+           (cdr seq))))
+

@@ -1,21 +1,12 @@
 # miniKanren-with-symbolic-constraints
 
-The version of miniKanren I normally use.  Includes `==`, `=/=`, `symbolo`, `numbero`, generalized `absento` constraints.
+A revision of https://github.com/webyrd/miniKanren-with-symbolic-constraints/ for better performance. Up to 10x faster for large queries involving heavy use of constraints.
 
-Good for writing Quine-generating interpreters, etc.  :)
+Includes `==`, `=/=`, `symbolo`, and `numbero`. `absento` is included, but the argument is required to be an eqv-comparable ground atom.
 
-Also includes `eigen`, which represents universally quanitifed variables.  Beware:  this implementation does *not* support use of `eigen` with constraints other than `==`.
-
-Also includes multi-query variable version of `run`.
-For example, `(run (q r s) (== (cons r q) s))`.
+Eigen was removed.
 
 ## Running
-
-### Chez and Vicare
-
-```
-(load "mk.scm")
-```
 
 ### Racket
 
@@ -23,16 +14,11 @@ For example, `(run (q r s) (== (cons r q) s))`.
 (require "mk.rkt")
 ```
 
-### Guile
+### Vicare
 
 ```
-(load "mk-guile.scm")
-```
-
-### Chicken
-
-```
-(load "mk-chicken.scm")
+(load "mk-vicare.scm")
+(load "mk.scm")
 ```
 
 ## Running Tests
