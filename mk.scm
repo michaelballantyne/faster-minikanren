@@ -248,15 +248,24 @@
 (define unit (lambda (c) c))
 (define choice (lambda (c f) (cons c f)))
 
+(define reset-cnt 23)
+(define initial-cnt 0)
+(define bind-cnt 0)
+
 (define-syntax inc
   (syntax-rules ()
-    ((_ e) (lambda () e))))
+    ((_ e) (lambda () e))
+    ((_ cnt e) (let ([f1 (lambda () (let ([cnt reset-cnt]) e))]
+                     [f2 (lambda (cnt) e)])
+                 (if (< cnt 1)
+                   f1
+                   (f2 (- cnt 1)))))))
 
 (define empty-f (inc (mzero)))
 
 (define-syntax lambdag@
   (syntax-rules ()
-    ((_ (st) e) (lambda (st) e))))
+    ((_ (st cnt) e) (lambda (st cnt) e))))
 
 (define-syntax case-inf
   (syntax-rules ()
@@ -274,24 +283,27 @@
 (define-syntax fresh
   (syntax-rules ()
     ((_ (x ...) g0 g ...)
-     (lambdag@ (st)
-       (inc
+     (lambdag@ (st cnt)
+       (inc cnt
          (let ((scope (subst-scope (state-S st))))
            (let ((x (var scope)) ...)
-             (bind* (g0 st) g ...))))))))
+             (bind* (g0 st cnt) cnt g ...))))))))
+
+
 
 (define-syntax bind*
   (syntax-rules ()
-    ((_ e) e)
-    ((_ e g0 g ...) (bind* (bind e g0) g ...))))
+    ((_ e cnt) e)
+    ((_ e cnt g0 g ...) (bind* (bind e g0 cnt) cnt g ...))))
 
 (define bind
-  (lambda (c-inf g)
+  (lambda (c-inf g cnt)
     (case-inf c-inf
       (() (mzero))
-      ((f) (inc (bind (f) g)))
-      ((c) (g c))
-      ((c f) (mplus (g c) (inc (bind (f) g)))))))
+      ((f) (inc (bind (f) g cnt)))
+      ((c) (g c (- cnt 1)))
+      ((c f) (mplus (g c (- cnt 1)) (inc (bind (f) g cnt)))))))
+
 
 (define-syntax run
   (syntax-rules ()
@@ -299,11 +311,11 @@
      (take n
        (inc
          ((fresh (q) g0 g ...
-            (lambdag@ (st)
+            (lambdag@ (st cnt)
               (let ((st (state-with-scope st nonlocal-scope)))
                 (let ((z ((reify q) st)))
                   (choice z empty-f)))))
-          empty-state))))
+          empty-state initial-cnt))))
     ((_ n (q0 q1 q ...) g0 g ...)
      (run n (x) (fresh (q0 q1 q ...) g0 g ... (== `(,q0 ,q1 ,q ...) x))))))
 
@@ -326,12 +338,12 @@
 (define-syntax conde
   (syntax-rules ()
     ((_ (g0 g ...) (g1 g^ ...) ...)
-     (lambdag@ (st)
-       (inc
+     (lambdag@ (st cnt)
+       (inc cnt
          (let ((st (state-with-scope st (new-scope))))
            (mplus*
-             (bind* (g0 st) g ...)
-             (bind* (g1 st) g^ ...) ...)))))))
+             (bind* (g0 st cnt) cnt g ...)
+             (bind* (g1 st cnt) cnt g^ ...) ...)))))))
 
 (define-syntax mplus*
   (syntax-rules ()
@@ -361,7 +373,7 @@
 (define type-constraint
   (lambda (type-pred type-id)
     (lambda (u)
-      (lambdag@ (st)
+      (lambdag@ (st cnt)
         (let ((term (walk u (state-S st))))
           (cond
             ((type-pred term) (unit st))
@@ -384,7 +396,7 @@
 
 (define =/=*
   (lambda (S+)
-    (lambdag@ (st)
+    (lambdag@ (st cnt)
       (let-values (((S added) (unify* S+ (subst-with-scope (state-S st) nonlocal-scope))))
         (cond
           ((not S) (unit st))
@@ -404,12 +416,12 @@
 
 (define absento
   (lambda (ground-atom term)
-    (lambdag@ (st)
+    (lambdag@ (st cnt)
       (let ((term (walk term (state-S st))))
         (cond
           ((pair? term)
-           (let ((st^ ((absento ground-atom (car term)) st)))
-             (and st^ ((absento ground-atom (cdr term)) st^))))
+           (let ((st^ ((absento ground-atom (car term)) st cnt)))
+             (and st^ ((absento ground-atom (cdr term)) st^ cnt))))
           ((eqv? term ground-atom) (mzero))
           ((var? term)
            (let* ((c (lookup-c term st))
@@ -431,7 +443,7 @@
 
 (define ==
   (lambda (u v)
-    (lambdag@ (st)
+    (lambdag@ (st cnt)
       (let-values (((S added) (unify u v (state-S st))))
         (if S
           (and-foldl update-constraints (state S (state-C st)) added)
@@ -445,7 +457,7 @@
       (if (eq? old-c empty-c)
         st
         (let ((st (remove-c (lhs a) st)))
-         (and-foldl (lambda (op st) (op st)) st
+         (and-foldl (lambda (op st) (op st 1)) st
           (append
             (if (eq? (c-T old-c) 'symbolo)
               (list (symbolo (rhs a)))
