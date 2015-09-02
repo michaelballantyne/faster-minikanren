@@ -248,7 +248,7 @@
 (define unit (lambda (c) c))
 (define choice (lambda (c f) (cons c f)))
 
-(define reset-cnt 23)
+(define reset-cnt 22)
 (define initial-cnt 0)
 (define bind-cnt 0)
 
