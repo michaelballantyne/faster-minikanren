@@ -476,6 +476,14 @@
        (vars (cdr term) (vars (car term) acc)))
       (else acc))))
 
+(define-syntax project
+  (syntax-rules ()
+    ((_ (x ...) g g* ...)
+     (lambdag@ (st)
+       (let ((x (walk* x (state-S st))) ...)
+         ((fresh () g g* ...) st))))))
+
+
 ; Create a constraint store of the old representation from a state object,
 ; so that we can use the old reifier. Only accumulates constraints related
 ; to the variable being reified which makes things a bit faster.
