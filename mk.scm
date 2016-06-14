@@ -276,6 +276,15 @@
   (syntax-rules ()
     ((_ (st) e) (lambda (st) e))))
 
+; Match on search streams. The state type must not be a pair with a procedure
+; in its cdr.
+;
+; (() e0)     failure
+; ((f) e1)    inc for interleaving. separate from success or failure to ensure
+;               it goes all the way to the top of the tree.
+; ((c) e2)    single result. Used rather than (choice c (inc (mzero))) to avoid
+;               returning to search a part of the tree that will inevitably fail.
+; ((c f) e3)  multiple results.
 (define-syntax case-inf
   (syntax-rules ()
     ((_ e (() e0) ((f^) e1) ((c^) e2) ((c f) e3))
@@ -371,9 +380,7 @@
        (map (reify q)
             (take n
                   ((fresh ()
-                     g0 g ...
-                     (lambdag@ (st)
-                               (choice st (lambda () #f))))
+                     g0 g ...)
                    empty-state)))))
     ((_ n (q0 q1 q ...) g0 g ...)
      (run n (x) (fresh (q0 q1 q ...) g0 g ... (== `(,q0 ,q1 ,q ...) x))))))
@@ -404,15 +411,15 @@
       (lambdag@ (st)
         (let ((term (walk u (state-S st))))
           (cond
-            ((type-pred term) (unit st))
+            ((type-pred term) st)
             ((var? term)
              (let* ((c (lookup-c term st))
                    (T (c-T c)))
                (cond
-                 ((eq? T type-id) (unit st))
-                 ((not T) (unit (set-c term (c-with-T c type-id) st)))
-                 (else (mzero)))))
-            (else (mzero))))))))
+                 ((eq? T type-id) st)
+                 ((not T) (set-c term (c-with-T c type-id) st))
+                 (else #f))))
+            (else #f)))))))
 
 (define symbolo (type-constraint symbol? 'symbolo))
 (define numbero (type-constraint number? 'numbero))
@@ -427,8 +434,8 @@
     (lambdag@ (st)
       (let-values (((S added) (unify* S+ (subst-with-scope (state-S st) nonlocal-scope))))
         (cond
-          ((not S) (unit st))
-          ((null? added) (mzero))
+          ((not S) st)
+          ((null? added) #f)
           (else
             ; Choose one of the disequality elements (el) to attach the constraint to. Only
             ; need to choose one because all must fail to cause the constraint to fail.
@@ -450,15 +457,15 @@
           ((pair? term)
            (let ((st^ ((absento ground-atom (car term)) st)))
              (and st^ ((absento ground-atom (cdr term)) st^))))
-          ((eqv? term ground-atom) (mzero))
+          ((eqv? term ground-atom) #f)
           ((var? term)
            (let* ((c (lookup-c term st))
                   (A (c-A c)))
              (if (memv ground-atom A)
-               (unit st)
+               st
                (let ((c^ (c-with-A c (cons ground-atom A))))
-                 (unit (set-c term c^ st))))))
-          (else (unit st)))))))
+                 (set-c term c^ st)))))
+          (else st))))))
 
 ; Fold lst with proc and initial value init. If proc ever returns #f,
 ; return with #f immediately. Used for applying a series of constraints
@@ -475,7 +482,7 @@
       (let-values (((S added) (unify u v (state-S st))))
         (if S
           (and-foldl update-constraints (state S (state-C st)) added)
-          (mzero))))))
+          #f)))))
 
 
 ; Not fully optimized. Could do absento update with fewer hash-refs / hash-sets.
