@@ -243,17 +243,35 @@
 
 ; Search
 
-; Search result types. Names inspired by the plus monad?
+; SearchStream: #f | Procedure | State | (Pair State (-> SearchStream))
+
+; SearchStream constructor types. Names inspired by the plus monad?
+
+; -> SearchStream
 (define mzero (lambda () #f))
+
+; c: State
+; -> SearchStream
 (define unit (lambda (c) c))
+
+; c: State
+; f: (-> SearchStream)
+; -> SearchStream
+;
+; f is a thunk to avoid unnecessary computation in the case that c is the
+; last answer needed to satisfy the query.
 (define choice (lambda (c f) (cons c f)))
 
+; e: SearchStream
+; -> (-> SearchStream)
 (define-syntax inc
   (syntax-rules ()
     ((_ e) (lambda () e))))
 
-(define empty-f (inc (mzero)))
+; Goal: (State -> SearchStream)
 
+; e: SearchStream
+; -> Goal
 (define-syntax lambdag@
   (syntax-rules ()
     ((_ (st) e) (lambda (st) e))))
@@ -271,74 +289,12 @@
          (else (let ((c (car c-inf)) (f (cdr c-inf)))
                  e3)))))))
 
-(define-syntax fresh
-  (syntax-rules ()
-    ((_ (x ...) g0 g ...)
-     (lambdag@ (st)
-       (inc
-         (let ((scope (subst-scope (state-S st))))
-           (let ((x (var scope)) ...)
-             (bind* (g0 st) g ...))))))))
-
-(define-syntax bind*
-  (syntax-rules ()
-    ((_ e) e)
-    ((_ e g0 g ...) (bind* (bind e g0) g ...))))
-
-(define bind
-  (lambda (c-inf g)
-    (case-inf c-inf
-      (() (mzero))
-      ((f) (inc (bind (f) g)))
-      ((c) (g c))
-      ((c f) (mplus (g c) (inc (bind (f) g)))))))
-
-(define-syntax run
-  (syntax-rules ()
-    ((_ n (q) g0 g ...)
-     (take n
-       (inc
-         ((fresh (q) g0 g ...
-            (lambdag@ (st)
-              (let ((st (state-with-scope st nonlocal-scope)))
-                (let ((z ((reify q) st)))
-                  (choice z empty-f)))))
-          empty-state))))
-    ((_ n (q0 q1 q ...) g0 g ...)
-     (run n (x) (fresh (q0 q1 q ...) g0 g ... (== `(,q0 ,q1 ,q ...) x))))))
-
-(define-syntax run*
-  (syntax-rules ()
-    ((_ (q0 q ...) g0 g ...) (run #f (q0 q ...) g0 g ...))))
-
-(define take
-  (lambda (n f)
-    (cond
-      ((and n (zero? n)) '())
-      (else
-       (case-inf (f)
-         (() '())
-         ((f) (take n f))
-         ((c) (cons c '()))
-         ((c f) (cons c
-                  (take (and n (- n 1)) f))))))))
-
-(define-syntax conde
-  (syntax-rules ()
-    ((_ (g0 g ...) (g1 g^ ...) ...)
-     (lambdag@ (st)
-       (inc
-         (let ((st (state-with-scope st (new-scope))))
-           (mplus*
-             (bind* (g0 st) g ...)
-             (bind* (g1 st) g^ ...) ...)))))))
-
-(define-syntax mplus*
-  (syntax-rules ()
-    ((_ e) e)
-    ((_ e0 e ...) (mplus e0
-                    (inc (mplus* e ...))))))
-
+; c-inf: SearchStream
+;     f: (-> SearchStream)
+; -> SearchStream
+;
+; f is a thunk to avoid unnecesarry computation in the case that the first
+; answer produced by c-inf is enough to satisfy the query.
 (define mplus
   (lambda (c-inf f)
     (case-inf c-inf
@@ -347,11 +303,95 @@
       ((c) (choice c f))
       ((c f^) (choice c (inc (mplus (f) f^)))))))
 
+; c-inf: SearchStream
+;     g: Goal
+; -> SearchStream
+(define bind
+  (lambda (c-inf g)
+    (case-inf c-inf
+      (() (mzero))
+      ((f) (inc (bind (f) g)))
+      ((c) (g c))
+      ((c f) (mplus (g c) (inc (bind (f) g)))))))
+
+; Int, SearchStream -> (ListOf SearchResult)
+(define take
+  (lambda (n f)
+    (cond
+      ((and n (zero? n)) '())
+      (else
+       (case-inf f
+         (() '())
+         ((f) (take n (f)))
+         ((c) (cons c '()))
+         ((c f) (cons c
+                  (take (and n (- n 1)) (f)))))))))
+
+; -> SearchStream
+(define-syntax bind*
+  (syntax-rules ()
+    ((_ e) e)
+    ((_ e g0 g ...) (bind* (bind e g0) g ...))))
+
+; -> SearchStream
+(define-syntax mplus*
+  (syntax-rules ()
+    ((_ e) e)
+    ((_ e0 e ...) (mplus e0
+                    (inc (mplus* e ...))))))
+
+; -> Goal
+(define-syntax fresh
+  (syntax-rules ()
+    ((_ (x ...) g0 g ...)
+     (lambdag@ (st)
+       ; this inc triggers interleaving
+       (inc
+         (let ((scope (subst-scope (state-S st))))
+           (let ((x (var scope)) ...)
+             (bind* (g0 st) g ...))))))))
+
+
+; -> Goal
+(define-syntax conde
+  (syntax-rules ()
+    ((_ (g0 g ...) (g1 g^ ...) ...)
+     (lambdag@ (st)
+       ; this inc triggers interleaving
+       (inc
+         (let ((st (state-with-scope st (new-scope))))
+           (mplus*
+             (bind* (g0 st) g ...)
+             (bind* (g1 st) g^ ...) ...)))))))
+
+(define-syntax run
+  (syntax-rules ()
+    ((_ n (q) g0 g ...)
+     (let ((q (var (new-scope))))
+       (map (reify q)
+            (take n
+                  ((fresh ()
+                     g0 g ...
+                     (lambdag@ (st)
+                               (choice st (lambda () #f))))
+                   empty-state)))))
+    ((_ n (q0 q1 q ...) g0 g ...)
+     (run n (x) (fresh (q0 q1 q ...) g0 g ... (== `(,q0 ,q1 ,q ...) x))))))
+
+(define-syntax run*
+  (syntax-rules ()
+    ((_ (q0 q ...) g0 g ...) (run #f (q0 q ...) g0 g ...))))
+
 
 ; Constraints
 ; C refers to the constraint store map
 ; c refers to an individual constraint record
 
+; Constraint: State -> #f | State
+;
+; (note that a Constraint is a Goal but a Goal is not a Constraint.
+;  Constraint implementations currently use this more restrained type. See `and-foldl`
+;  and `update-constraints`.)
 
 ; Requirements for type constraints:
 ; 1. Must be positive, not negative. not-pairo wouldn't work.
