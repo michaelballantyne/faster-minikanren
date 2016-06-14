@@ -244,17 +244,13 @@
 ; Search
 
 ; Search result types. Names inspired by the plus monad?
-(define mzero (lambda () (lambda (fail incd single multi) (fail))))
-(define unit (lambda (c) (lambda (fail incd single multi) (single c))))
-(define choice (lambda (c f) (lambda (fail incd single multi) (multi c f))))
-
-;(define mzero (lambda () #f))
-;(define unit (lambda (c) c))
-;(define choice (lambda (c f) (cons c f)))
+(define mzero (lambda () #f))
+(define unit (lambda (c) c))
+(define choice (lambda (c f) (cons c f)))
 
 (define-syntax inc
   (syntax-rules ()
-    ((_ e) (lambda (fail incd single multi) (incd (lambda () e))))))
+    ((_ e) (lambda () e))))
 
 (define-syntax lambdag@
   (syntax-rules ()
@@ -263,12 +259,15 @@
 (define-syntax case-inf
   (syntax-rules ()
     ((_ e (() e0) ((f^) e1) ((c^) e2) ((c f) e3))
-     (lambda k*
-       (e
-         (lambda () (apply e0 k*))
-         (lambda (f^) (apply e1 k*))
-         (lambda (c^) (apply e2 k*))
-         (lambda (c f) (apply e3 k*)))))))
+     (let ((c-inf e))
+       (cond
+         ((not c-inf) e0)
+         ((procedure? c-inf)  (let ((f^ c-inf)) e1))
+         ((not (and (pair? c-inf)
+                 (procedure? (cdr c-inf))))
+          (let ((c^ c-inf)) e2))
+         (else (let ((c (car c-inf)) (f (cdr c-inf)))
+                 e3)))))))
 
 (define-syntax fresh
   (syntax-rules ()
@@ -286,12 +285,11 @@
 
 (define bind
   (lambda (c-inf g)
-    (lambda (fail incd single multi)
-      (c-inf
-        fail
-        (lambda (f) (incd (lambda () (bind (f) g))))
-        (lambda (c) ((g c) fail incd single multi))
-        (lambda (c f) ((mplus (g c) (lambda () (bind (f) g))) fail incd single multi))))))
+    (case-inf c-inf
+      (() (mzero))
+      ((f) (inc (bind (f) g)))
+      ((c) (g c))
+      ((c f) (mplus (g c) (inc (bind (f) g)))))))
 
 (define-syntax run
   (syntax-rules ()
@@ -302,7 +300,7 @@
             (lambdag@ (st)
               (let ((st (state-with-scope st nonlocal-scope)))
                 (let ((z ((reify q) st)))
-                  (choice z (lambda () (mzero)))))))
+                  (choice z (lambda () #f))))))
           empty-state))))
     ((_ n (q0 q1 q ...) g0 g ...)
      (run n (x) (fresh (q0 q1 q ...) g0 g ... (== `(,q0 ,q1 ,q ...) x))))))
@@ -316,12 +314,12 @@
     (cond
       ((and n (zero? n)) '())
       (else
-        (f
-          (lambda () '())
-          (lambda (thunk) (take n (thunk)))
-          (lambda (c) (cons c '()))
-          (lambda (c f) (cons c
-                              (take (and n (- n 1)) (f)))))))))
+       (case-inf (f)
+         (() '())
+         ((f) (take n f))
+         ((c) (cons c '()))
+         ((c f) (cons c
+                  (take (and n (- n 1)) f))))))))
 
 (define-syntax conde
   (syntax-rules ()
@@ -337,32 +335,20 @@
   (syntax-rules ()
     ((_ e) e)
     ((_ e0 e ...) (mplus e0
-                    (lambda () (mplus* e ...))))))
+                    (inc (mplus* e ...))))))
 
 (define mplus
   (lambda (c-inf f)
-    (lambda (fail incd single multi)
-      (c-inf
-        (lambda () ((f) fail incd single multi))
-        (lambda (f^) (incd (lambda () (mplus (f) f^))))
-        (lambda (c) (multi c f))
-        (lambda (c f^) (multi c (lambda () (mplus (f) f^))))))))
-
+    (case-inf c-inf
+      (() (f))
+      ((f^) (inc (mplus (f) f^)))
+      ((c) (choice c f))
+      ((c f^) (choice c (inc (mplus (f) f^)))))))
 
 
 ; Constraints
 ; C refers to the constraint store map
 ; c refers to an individual constraint record
-
-
-(define (->goal f)
-  (lambda args
-    (let ([c (apply f args)])
-      (lambda (st)
-        (let ([res (c st)])
-          (if res
-            (unit res)
-            (mzero)))))))
 
 
 ; Requirements for type constraints:
@@ -376,21 +362,18 @@
       (lambdag@ (st)
         (let ((term (walk u (state-S st))))
           (cond
-            ((type-pred term) st)
+            ((type-pred term) (unit st))
             ((var? term)
              (let* ((c (lookup-c term st))
                    (T (c-T c)))
                (cond
-                 ((eq? T type-id) st)
-                 ((not T) (set-c term (c-with-T c type-id) st))
-                 (else #f))))
-            (else #f)))))))
+                 ((eq? T type-id) (unit st))
+                 ((not T) (unit (set-c term (c-with-T c type-id) st)))
+                 (else (mzero)))))
+            (else (mzero))))))))
 
-(define symbolo-internal (type-constraint symbol? 'symbolo))
-(define numbero-internal (type-constraint number? 'numbero))
-
-(define symbolo (->goal symbolo-internal))
-(define numbero (->goal numbero-internal))
+(define symbolo (type-constraint symbol? 'symbolo))
+(define numbero (type-constraint number? 'numbero))
 
 (define (add-to-D st v d)
   (let* ((c (lookup-c v st))
@@ -402,8 +385,8 @@
     (lambdag@ (st)
       (let-values (((S added) (unify* S+ (subst-with-scope (state-S st) nonlocal-scope))))
         (cond
-          ((not S) st)
-          ((null? added) #f)
+          ((not S) (unit st))
+          ((null? added) (mzero))
           (else
             ; Choose one of the disequality elements (el) to attach the constraint to. Only
             ; need to choose one because all must fail to cause the constraint to fail.
@@ -414,29 +397,26 @@
                   st)))))))))
 
 (define =/=
-  (->goal
-    (lambda (u v)
-      (=/=* `((,u . ,v))))))
+  (lambda (u v)
+    (=/=* `((,u . ,v)))))
 
-(define absento-internal
+(define absento
   (lambda (ground-atom term)
     (lambdag@ (st)
       (let ((term (walk term (state-S st))))
         (cond
           ((pair? term)
-           (let ((st^ ((absento-internal ground-atom (car term)) st)))
-             (and st^ ((absento-internal ground-atom (cdr term)) st^))))
-          ((eqv? term ground-atom) #f)
+           (let ((st^ ((absento ground-atom (car term)) st)))
+             (and st^ ((absento ground-atom (cdr term)) st^))))
+          ((eqv? term ground-atom) (mzero))
           ((var? term)
            (let* ((c (lookup-c term st))
                   (A (c-A c)))
              (if (memv ground-atom A)
-               st
+               (unit st)
                (let ((c^ (c-with-A c (cons ground-atom A))))
-                 (set-c term c^ st)))))
-          (else st))))))
-
-(define absento (->goal absento-internal))
+                 (unit (set-c term c^ st))))))
+          (else (unit st)))))))
 
 ; Fold lst with proc and initial value init. If proc ever returns #f,
 ; return with #f immediately. Used for applying a series of constraints
@@ -448,13 +428,12 @@
       (and res (and-foldl proc res (cdr lst))))))
 
 (define ==
-  (->goal
-    (lambda (u v)
-      (lambdag@ (st)
-                (let-values (((S added) (unify u v (state-S st))))
-                  (if S
-                    (and-foldl update-constraints (state S (state-C st)) added)
-                    #f))))))
+  (lambda (u v)
+    (lambdag@ (st)
+      (let-values (((S added) (unify u v (state-S st))))
+        (if S
+          (and-foldl update-constraints (state S (state-C st)) added)
+          (mzero))))))
 
 
 ; Not fully optimized. Could do absento update with fewer hash-refs / hash-sets.
@@ -467,12 +446,12 @@
          (and-foldl (lambda (op st) (op st)) st
           (append
             (if (eq? (c-T old-c) 'symbolo)
-              (list (symbolo-internal (rhs a)))
+              (list (symbolo (rhs a)))
               '())
             (if (eq? (c-T old-c) 'numbero)
-              (list (numbero-internal (rhs a)))
+              (list (numbero (rhs a)))
               '())
-            (map (lambda (atom) (absento-internal atom (rhs a))) (c-A old-c))
+            (map (lambda (atom) (absento atom (rhs a))) (c-A old-c))
             (map (lambda (d) (=/=* d)) (c-D old-c)))))))))
 
 

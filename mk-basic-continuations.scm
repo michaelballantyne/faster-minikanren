@@ -270,6 +270,19 @@
          (lambda (c^) (apply e2 k*))
          (lambda (c f) (apply e3 k*)))))))
 
+;(define-syntax case-inf
+  ;(syntax-rules ()
+    ;((_ e (() e0) ((f^) e1) ((c^) e2) ((c f) e3))
+     ;(let ((c-inf e))
+       ;(cond
+         ;((not c-inf) e0)
+         ;((procedure? c-inf)  (let ((f^ c-inf)) e1))
+         ;((not (and (pair? c-inf)
+                 ;(procedure? (cdr c-inf))))
+          ;(let ((c^ c-inf)) e2))
+         ;(else (let ((c (car c-inf)) (f (cdr c-inf)))
+                 ;e3)))))))
+
 (define-syntax fresh
   (syntax-rules ()
     ((_ (x ...) g0 g ...)
@@ -286,12 +299,11 @@
 
 (define bind
   (lambda (c-inf g)
-    (lambda (fail incd single multi)
-      (c-inf
-        fail
-        (lambda (f) (incd (lambda () (bind (f) g))))
-        (lambda (c) ((g c) fail incd single multi))
-        (lambda (c f) ((mplus (g c) (lambda () (bind (f) g))) fail incd single multi))))))
+    (case-inf c-inf
+      (() (mzero))
+      ((f) (inc (bind (f) g)))
+      ((c) (g c))
+      ((c f) (mplus (g c) (lambda () (bind (f) g)))))))
 
 (define-syntax run
   (syntax-rules ()
@@ -341,13 +353,11 @@
 
 (define mplus
   (lambda (c-inf f)
-    (lambda (fail incd single multi)
-      (c-inf
-        (lambda () ((f) fail incd single multi))
-        (lambda (f^) (incd (lambda () (mplus (f) f^))))
-        (lambda (c) (multi c f))
-        (lambda (c f^) (multi c (lambda () (mplus (f) f^))))))))
-
+    (case-inf c-inf
+      (() (f))
+      ((f^) (inc (mplus (f) f^)))
+      ((c) (choice c f))
+      ((c f^) (choice c (lambda () (mplus (f) f^)))))))
 
 
 ; Constraints
