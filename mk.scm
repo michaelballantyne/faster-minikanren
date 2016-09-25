@@ -329,12 +329,12 @@
     (cond
       ((and n (zero? n)) '())
       (else
-       (case-inf f
+       (case-inf (f)
          (() '())
-         ((f) (take n (f)))
+         ((f) (take n f))
          ((c) (cons c '()))
          ((c f) (cons c
-                  (take (and n (- n 1)) (f)))))))))
+                  (take (and n (- n 1)) f))))))))
 
 ; -> SearchStream
 (define-syntax bind*
@@ -376,12 +376,14 @@
 (define-syntax run
   (syntax-rules ()
     ((_ n (q) g0 g ...)
-     (let ((q (var (new-scope))))
-       (map (reify q)
-            (take n
-                  ((fresh ()
-                     g0 g ...)
-                   empty-state)))))
+     (take n
+       (inc
+         ((fresh (q) g0 g ...
+            (lambdag@ (st)
+              (let ((st (state-with-scope st nonlocal-scope)))
+                (let ((z ((reify q) st)))
+                  (choice z (lambda () (lambda () #f)))))))
+          empty-state))))
     ((_ n (q0 q1 q ...) g0 g ...)
      (run n (x) (fresh (q0 q1 q ...) g0 g ... (== `(,q0 ,q1 ,q ...) x))))))
 
