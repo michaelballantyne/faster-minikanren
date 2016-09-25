@@ -1,3 +1,5 @@
+(define test-failed #f)
+
 (define-syntax test
   (syntax-rules ()
     ((_ title tested-expression expected-result)
@@ -6,5 +8,7 @@
        (let* ((expected expected-result)
               (produced tested-expression))
          (or (equal? expected produced)
-             (printf "Failed: ~a~%Expected: ~a~%Computed: ~a~%"
-                     'tested-expression expected produced)))))))
+             (begin
+               (set! test-failed #t)
+               (printf "Failed: ~a~%Expected: ~a~%Computed: ~a~%"
+                     'tested-expression expected produced))))))))
