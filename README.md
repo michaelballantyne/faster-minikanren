@@ -10,6 +10,24 @@ Eigen was removed.
 
 ### Racket
 
+#### From the Package Server
+
+This is available on the [Racket package server](https://pkgn.racket-lang.org/package/faster-minikanren), so it can be installed with Racket's package manager:
+
+```
+raco pkg install faster-minikanren
+```
+
+After which you can import it in a Racket module with
+
+```
+(require minikanren)
+```
+
+#### From a checkout of this repository
+
+Alternatively the files from this repository can be used directly:
+
 ```
 (require "mk.rkt")
 ```
@@ -18,12 +36,6 @@ to load tests:
 
 ```
 racket test-all.rktl
-```
-
-This repository is also a package for the Racket package manager. When it is installed, it may be used with:
-
-```
-(require minikanren)
 ```
 
 ### Vicare and Chez Scheme
