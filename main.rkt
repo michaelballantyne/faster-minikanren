@@ -3,4 +3,5 @@
 (require "mk.rkt")
 
 (provide (all-from-out "mk.rkt")
-         quote quasiquote unquote)
+         quote quasiquote unquote
+         define)
