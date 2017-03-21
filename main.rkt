@@ -1,7 +1,10 @@
-#lang racket
+#lang racket/base
 
 (require "mk.rkt")
 
 (provide (all-from-out "mk.rkt")
          quote quasiquote unquote
-         define)
+         define
+         #%datum
+         #%app
+         let)

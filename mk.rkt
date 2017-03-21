@@ -1,12 +1,14 @@
-#lang racket
+#lang racket/base
+
+(require racket/list
+         racket/include)
 
 (provide run run*
          == =/=
          fresh
          conde
          symbolo numbero
-         absento
-         (all-defined-out))
+         absento)
 
 ;; extra stuff for racket
 ;; due mostly to samth
