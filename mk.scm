@@ -1,17 +1,19 @@
 ; Scope object.
-; Used to determine whether a branch has occured between variable creation
-; and unification to allow the set-var-val! optimization in subst-add. Both variables
-; and substitutions will contain a scope. When a substitution flows through a
-; conde it is assigned a new scope.
+; Used to determine whether a branch has occured between variable
+; creation and unification to allow the set-var-val! optimization
+; in subst-add. Both variables and substitutions will contain a
+; scope. When a substitution flows through a conde it is assigned
+; a new scope.
 
 ; Creates a new scope that is not scope-eq? to any other scope
 (define new-scope
   (lambda ()
     (list 'scope)))
 
-; Scope used when variable bindings should always be made in the substitution,
-; as in disequality solving and reification. We don't want to set-var-val! a
-; variable when checking if a disequality constraint holds!
+; Scope used when variable bindings should always be made in the
+; substitution, as in disequality solving and reification. We
+; don't want to set-var-val! a variable when checking if a
+; disequality constraint holds!
 (define nonlocal-scope
   (list 'non-local-scope))
 
@@ -20,14 +22,16 @@
 
 ; Logic variable object.
 ; Contains:
-;   val - value for variable assigned by unification using set-var-val! optimization.
-;           unbound if not yet set or stored in substitution.
+;   val - value for variable assigned by unification using
+;      set-var-val! optimization. unbound if not yet set or
+;      stored in substitution.
 ;   scope - scope that the variable was created in.
-;   idx - unique numeric index for the variable. Used by the trie substitution representation.
+;   idx - unique numeric index for the variable. Used by the
+;      trie substitution representation.
 ; Variable objects are compared by object identity.
 
-; The unique val for variables that have not yet been bound to a value
-; or are bound in the substitution
+; The unique val for variables that have not yet been bound
+; to a value or are bound in the substitution
 (define unbound (list 'unbound))
 
 (define var
@@ -36,7 +40,8 @@
       (set! counter (+ 1 counter))
       (vector unbound scope counter))))
 
-; Vectors are not allowed as terms, so terms that are vectors are variables.
+; Vectors are not allowed as terms, so terms that are vectors
+; are variables.
 (define var?
   (lambda (x)
     (vector? x)))
@@ -63,12 +68,13 @@
 ; Substitution object.
 ; Contains:
 ;   map - mapping of variables to values
-;   scope - scope at current program point, for set-var-val! optimization. Updated at conde.
-;               Included in the substitution because it is required to fully define the substitution
-;               and how it is to be extended.
+;   scope - scope at current program point, for set-var-val!
+;     optimization. Updated at conde. Included in the substitution
+;     because it is required to fully define the substitution
+;     and how it is to be extended.
 ;
-; Implementation of the substitution map depends on the Scheme used, as we need a map. See mk.rkt
-; and mk-vicare.scm.
+; Implementation of the substitution map depends on the Scheme used,
+; as we need a map. See mk.rkt and mk-vicare.scm.
 
 (define subst
   (lambda (mapping scope)
@@ -90,8 +96,8 @@
 
 (define subst-add
   (lambda (S x v)
-    ; set-var-val! optimization: set the value directly on the variable
-    ; object if we haven't branched since its creation
+    ; set-var-val! optimization: set the value directly on the
+    ; variable object if we haven't branched since its creation
     ; (the scope of the variable and the substitution are the same).
     ; Otherwise extend the substitution mapping.
     (if (scope-eq? (var-scope x) (subst-scope S))
@@ -110,9 +116,10 @@
       (subst-map-lookup u (subst-map S)))))
 
 ; Association object.
-; Describes an association mapping the lhs to the rhs. Returned by unification
-; to describe the associations that were added to the substitution (whose representation
-; is opaque) and used to represent disequality constraints.
+; Describes an association mapping the lhs to the rhs. Returned by
+; unification to describe the associations that were added to the
+; substitution (whose representation is opaque) and used to represent
+; disequality constraints.
 
 (define lhs car)
 
@@ -123,15 +130,17 @@
 ; Describes the constraints attached to a single variable.
 ;
 ; Contains:
-;   T - type constraint. 'symbolo 'numbero or #f to indicate no constraint
-;   D - list of disequality constraints. Each disequality is a list of associations.
-;           The constraint is violated if all associated variables are equal in the
-;           substitution simultaneously. D could contain duplicate constraints (created
-;           by distinct =/= calls). A given disequality constraint is only attached to
-;           one of the variables involved, as all components of the constraint must be
-;           violated to cause failure.
-;   A - list of absento constraints. Each constraint is a ground atom. The list contains
-;           no duplicates.
+;   T - type constraint. 'symbolo 'numbero or #f to indicate
+;         no constraint
+;   D - list of disequality constraints. Each disequality is a list of
+;         associations. The constraint is violated if all associated
+;         variables are equal in the substitution simultaneously. D
+;         could contain duplicate constraints (created by distinct =/=
+;         calls). A given disequality constraint is only attached to
+;         one of the variables involved, as all components of the
+;         constraint must be violated to cause failure.
+;   A - list of absento constraints. Each constraint is a ground atom.
+;         The list contains no duplicates.
 
 (define empty-c `(#f () ()))
 
@@ -160,15 +169,15 @@
     (list (c-T c) (c-D c) A)))
 
 ; Constraint store object.
-; Mapping of representative variable to constraint record. Constraints are
-; always on the representative element and must be moved / merged when that
-; element changes.
+; Mapping of representative variable to constraint record. Constraints
+; are always on the representative element and must be moved / merged
+; when that element changes.
 
-; Implementation depends on the Scheme used, as we need a map. See mk.rkt
-; and mk-vicare.scm.
+; Implementation depends on the Scheme used, as we need a map. See
+; mk.rkt and mk-vicare.scm.
 
 ; State object.
-; The state is the value that is monadically passed through the search.
+; The state is the value that is monadically passed through the search
 ; Contains:
 ;   S - the substitution
 ;   C - the constraint store
@@ -214,11 +223,13 @@
       ((occurs-check x v S) (values #f #f))
       (else (values (subst-add S x v) `((,x . ,v)))))))
 
-; Returns as values the extended substitution and a list of associations added
-; during the unification, or (values #f #f) if the unification failed.
+; Returns as values the extended substitution and a list of
+; associations added during the unification, or (values #f #f) if the
+; unification failed.
 ;
-; Right now appends the list of added values from sub-unifications. Alternatively
-; could be threaded monadically, which could be faster or slower.
+; Right now appends the list of added values from sub-unifications.
+; Alternatively could be threaded monadically, which could be faster
+; or slower.
 (define unify
   (lambda (u v s)
     (let ((u (walk u s))
@@ -258,8 +269,8 @@
 ; f: (-> SearchStream)
 ; -> SearchStream
 ;
-; f is a thunk to avoid unnecessary computation in the case that c is the
-; last answer needed to satisfy the query.
+; f is a thunk to avoid unnecessary computation in the case that c is
+; the last answer needed to satisfy the query.
 (define choice (lambda (c f) (cons c f)))
 
 ; e: SearchStream
@@ -276,14 +287,15 @@
   (syntax-rules ()
     ((_ (st) e) (lambda (st) e))))
 
-; Match on search streams. The state type must not be a pair with a procedure
-; in its cdr.
+; Match on search streams. The state type must not be a pair with a
+; procedure in its cdr.
 ;
 ; (() e0)     failure
-; ((f) e1)    inc for interleaving. separate from success or failure to ensure
-;               it goes all the way to the top of the tree.
-; ((c) e2)    single result. Used rather than (choice c (inc (mzero))) to avoid
-;               returning to search a part of the tree that will inevitably fail.
+; ((f) e1)    inc for interleaving. separate from success or failure
+;               to ensure it goes all the way to the top of the tree.
+; ((c) e2)    single result. Used rather than (choice c (inc (mzero)))
+;               to avoid returning to search a part of the tree that
+;               will inevitably fail.
 ; ((c f) e3)  multiple results.
 (define-syntax case-inf
   (syntax-rules ()
@@ -302,8 +314,8 @@
 ;     f: (-> SearchStream)
 ; -> SearchStream
 ;
-; f is a thunk to avoid unnecesarry computation in the case that the first
-; answer produced by c-inf is enough to satisfy the query.
+; f is a thunk to avoid unnecesarry computation in the case that the
+; first answer produced by c-inf is enough to satisfy the query.
 (define mplus
   (lambda (c-inf f)
     (case-inf c-inf
@@ -385,7 +397,10 @@
                   (choice z (lambda () (lambda () #f)))))))
           empty-state))))
     ((_ n (q0 q1 q ...) g0 g ...)
-     (run n (x) (fresh (q0 q1 q ...) g0 g ... (== `(,q0 ,q1 ,q ...) x))))))
+     (run n (x)
+       (fresh (q0 q1 q ...)
+         g0 g ...
+         (== `(,q0 ,q1 ,q ...) x))))))
 
 (define-syntax run*
   (syntax-rules ()
@@ -399,14 +414,14 @@
 ; Constraint: State -> #f | State
 ;
 ; (note that a Constraint is a Goal but a Goal is not a Constraint.
-;  Constraint implementations currently use this more restrained type. See `and-foldl`
-;  and `update-constraints`.)
+;  Constraint implementations currently use this more restrained type.
+;  See `and-foldl` and `update-constraints`.)
 
 ; Requirements for type constraints:
 ; 1. Must be positive, not negative. not-pairo wouldn't work.
 ; 2. Each type must have infinitely many possible values to avoid
-;      incorrectness in combination with disequality constraints, like:
-;      (fresh (x) (booleano x) (=/= x #t) (=/= x #f))
+;      incorrectness in combination with disequality constraints,
+;      like: (fresh (x) (booleano x) (=/= x #t) (=/= x #f))
 (define type-constraint
   (lambda (type-pred type-id)
     (lambda (u)
@@ -434,13 +449,16 @@
 (define =/=*
   (lambda (S+)
     (lambdag@ (st)
-      (let-values (((S added) (unify* S+ (subst-with-scope (state-S st) nonlocal-scope))))
+      (let-values (((S added) (unify* S+ (subst-with-scope
+                                           (state-S st)
+                                           nonlocal-scope))))
         (cond
           ((not S) st)
           ((null? added) #f)
           (else
-            ; Choose one of the disequality elements (el) to attach the constraint to. Only
-            ; need to choose one because all must fail to cause the constraint to fail.
+            ; Choose one of the disequality elements (el) to attach
+            ; the constraint to. Only need to choose one because
+            ; all must fail to cause the constraint to fail.
             (let ((el (car added)))
               (let ((st (add-to-D st (car el) added)))
                 (if (var? (cdr el))
@@ -470,8 +488,8 @@
           (else st))))))
 
 ; Fold lst with proc and initial value init. If proc ever returns #f,
-; return with #f immediately. Used for applying a series of constraints
-; to a state, failing if any operation fails.
+; return with #f immediately. Used for applying a series of
+; constraints to a state, failing if any operation fails.
 (define (and-foldl proc init lst)
   (if (null? lst)
     init
@@ -487,7 +505,8 @@
           #f)))))
 
 
-; Not fully optimized. Could do absento update with fewer hash-refs / hash-sets.
+; Not fully optimized. Could do absento update with fewer
+; hash-refs / hash-sets.
 (define update-constraints
   (lambda (a st)
     (let ([old-c (lookup-c (lhs a) st)])
@@ -533,9 +552,10 @@
          ((fresh () g g* ...) st))))))
 
 
-; Create a constraint store of the old representation from a state object,
-; so that we can use the old reifier. Only accumulates constraints related
-; to the variable being reified which makes things a bit faster.
+; Create a constraint store of the old representation from a state
+; object, so that we can use the old reifier. Only accumulates
+; constraints related to the variable being reified which makes things
+; a bit faster.
 (define c-from-st
   (lambda (st x)
     (let ((vs (vars (walk* x (state-S st)) '())))
@@ -575,7 +595,8 @@
                  (N (walk* (c->N c) S))
                  (T (walk* (c->T c) S)))
             (let ((v (walk* x S)))
-              (let ((R (reify-S v (subst empty-subst-map nonlocal-scope))))
+              (let ((R (reify-S v (subst empty-subst-map
+                                         nonlocal-scope))))
                 (reify+ v R
                         (let ((D (remp
                                    (lambda (d)
@@ -593,7 +614,8 @@
                                 (anyvar? t R)) T))))))))))
 
 
-; Bits from the old constraint implementation, still used for reification.
+; Bits from the old constraint implementation, still used for
+; reification.
 
 ; In this part of the code, c refers to the
 ; old constraint store with components:
@@ -615,7 +637,11 @@
     ((_ (c) e) (lambda (c) e))
     ((_ (c : S D Y N T) e)
      (lambda (c)
-       (let ((S (c->S c)) (D (c->D c)) (Y (c->Y c)) (N (c->N c)) (T (c->T c)))
+       (let ((S (c->S c))
+             (D (c->D c))
+             (Y (c->Y c))
+             (N (c->N c))
+             (T (c->T c)))
          e)))))
 
 (define tagged?
@@ -931,7 +957,9 @@
 
 (define term=?
   (lambda (u t S)
-    (let-values (((S added) (unify u t (subst-with-scope S nonlocal-scope))))
+    (let-values (((S added) (unify u t (subst-with-scope
+                                         S
+                                         nonlocal-scope))))
       (and S (null? added)))))
 
 (define ground-non-<type>?
@@ -1063,7 +1091,9 @@
     (cond
       ((null? d*) #f)
       (else
-        (let-values (((S ignore) (unify* d (subst empty-subst-map nonlocal-scope))))
+        (let-values (((S ignore) (unify* d (subst
+                                             empty-subst-map
+                                             nonlocal-scope))))
           (let-values (((S+ added) (unify* (car d*) S)))
             (or
               (and S+ (null? added))
@@ -1081,7 +1111,10 @@
                        ((not S0) #f)
                        ((==fail-check S0 '() Y N T) #f)
                        (else
-                         (let-values (((S added) (unify* d (subst empty-subst-map nonlocal-scope))))
+                         (let-values
+                           (((S added)
+                             (unify* d (subst empty-subst-map
+                                              nonlocal-scope))))
                            added)))))
                  D)))))
 
