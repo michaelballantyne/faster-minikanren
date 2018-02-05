@@ -53,6 +53,20 @@ To run tests:
 (load "test-all.scm")
 ```
 
+### Guile
+
+After putting the directory in Guile's load path:
+
+```
+(use-modules (faster-miniKanren mk-guile))
+```
+
+To run tests:
+
+```
+guile test-guile.scm
+```
+
 ## Other code
 
 `numbers.scm` includes the relational number system described in The Reasoned Schemer.
