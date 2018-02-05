@@ -471,13 +471,13 @@
 
 (define absento
   (lambda (ground-atom term)
+    (unless (or (symbol? ground-atom)
+                (number? ground-atom)
+                (boolean? ground-atom)
+                (null? ground-atom))
+      (error 'absento "first argument to absento must be a ground atom"))
     (lambdag@ (st)
       (let ((term (walk term (state-S st))))
-        (unless (or (symbol? ground-atom)
-                    (number? ground-atom)
-                    (boolean? ground-atom)
-                    (null? ground-atom))
-          (error 'absento "first argument to absento must be a ground atom"))
         (cond
           ((pair? term)
            (let ((st^ ((absento ground-atom (car term)) st)))
