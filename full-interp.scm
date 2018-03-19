@@ -149,6 +149,7 @@
        (conde
          ((== v1 v2) (== #t val))
          ((=/= v1 v2) (== #f val))))]
+    ;; FIXME (webyrd) -- symbol?, and perhaps other type predicates, doesn't handle booleans (fails)
     [(== prim-id 'symbol?)
      (fresh (v)
        (== `(,v) a*)
