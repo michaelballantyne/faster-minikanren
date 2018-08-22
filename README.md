@@ -2,7 +2,9 @@
 
 A revision of https://github.com/webyrd/miniKanren-with-symbolic-constraints/ for better performance. Up to 10x faster for large queries involving heavy use of constraints.
 
-Includes `==`, `=/=`, `symbolo`, and `numbero`. `absento` is included, but the argument is required to be an eqv-comparable ground atom.
+Includes `==`, `=/=`, `symbolo`, `numbero`, and `absento`.
+
+*** Update (WEB, 21 August 02018): `absento` is now general--the first argument can be any legal miniKanren term, and needn't be ground.  Previously, `faster-miniKanren` required the first argument to `absento` be an `eqv?`-comparable ground atom.  Thanks to Michael Ballantyne for pointing out how to remove this restriction.
 
 Eigen was removed.
 
