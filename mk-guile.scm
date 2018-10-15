@@ -18,8 +18,8 @@
 (define fxsra fxarithmetic-shift-right)
 (define fxsll bitwise-arithmetic-shift-left)
 
-(include "mk-vicare.scm")
-(include "mk.scm")
+(include-from-path "faster-miniKanren/mk-vicare.scm")
+(include-from-path "faster-miniKanren/mk.scm")
 
 (define (andmap proc . args)
   (let ((l (length (car args))))
@@ -38,4 +38,4 @@
 
 (define generate-temporary gensym)
 
-(include "matche.scm")
+(include-from-path "faster-miniKanren/matche.scm")
