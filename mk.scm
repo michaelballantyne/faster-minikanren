@@ -183,17 +183,18 @@
 ;   C - the constraint store
 
 (define state
-  (lambda (S C)
-    (cons S C)))
+  (lambda (S C L)
+    (list S C L)))
 
 (define state-S (lambda (st) (car st)))
-(define state-C (lambda (st) (cdr st)))
+(define state-C (lambda (st) (cadr st)))
+(define state-L (lambda (st) (caddr st)))
 
-(define empty-state (state empty-subst empty-C))
+(define empty-state (state empty-subst empty-C '()))
 
 (define state-with-scope
   (lambda (st new-scope)
-    (state (subst-with-scope (state-S st) new-scope) (state-C st))))
+    (state (subst-with-scope (state-S st) new-scope) (state-C st) (state-L st))))
 
 ; Unification
 
@@ -508,7 +509,7 @@
     (lambdag@ (st)
       (let-values (((S added) (unify u v (state-S st))))
         (if S
-          (and-foldl update-constraints (state S (state-C st)) added)
+          (and-foldl update-constraints (state S (state-C st) (state-L st)) added)
           #f)))))
 
 
@@ -594,7 +595,9 @@
 (define reify
   (lambda (x)
     (lambda (st)
-      (let ((c (c-from-st st x)))
+      (let* ((L (walk* (state-L st) (state-S st)))
+             (x (if (null? L) x (list x '!! L)))
+             (c (c-from-st st x)))
         (let ((c (cycle c)))
           (let* ((S (c->S c))
                  (D (walk* (c->D c) S))
@@ -1158,3 +1161,40 @@
       ,move-T-to-D-b/c-t2-atom ,split-t-move-to-d-b/c-pair
       ,drop-from-D-b/c-T ,drop-t-b/c-t2-occurs-t1)))
 
+(define fix-l==
+  (lambda (t)
+    (if (and (pair? t)
+             (or (eq? '== (car t))
+                 (eq? '=/= (car t))))
+        (list (car t) (quasi (cadr t)) (quasi (caddr t)))
+        t)))
+
+(define quasi
+  (lambda (t)
+    (cond
+      ((var? t) t)
+      ((and (pair? t) (eq? (car t) 'sym)) (cdr t))
+      ((pair? t) (list 'cons (quasi (car t)) (quasi (cdr t))))
+      ((null? t) ''())
+      (else (list 'quote t)))))
+
+(define walk-lift
+  (lambda (L S)
+    (map fix-l== (walk* (reverse L) S))))
+
+(define lift
+  (lambda (x)
+    (lambdag@ (st)
+      (state (state-S st) (state-C st) (cons x (state-L st))))))
+
+(define lift-scope
+  (lambda (g out)
+    (lambdag@ (st)
+      (bind*
+       (g (state (state-S st) (state-C st) '()))
+       (lambdag@ (st2)
+         ((fresh ()
+            (== out (walk-lift (state-L st2) (state-S st2))))
+          st))))))
+
+(define l== (lambda (e1 e2) (fresh () (lift `(== ,e1 ,e2)))))
