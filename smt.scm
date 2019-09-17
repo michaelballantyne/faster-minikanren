@@ -111,9 +111,10 @@
                     (let loop ((ms '()))
                       (let ((m (get-next-model (cdr SM) ms)))
                         (and m
-                             (mplus
-                              ((add-model m (car SM))
-                               (state (state-S st) (state-C st) '()))
-                              (lambda () (if get-next-model?
-                                        (loop (cons m ms))
-                                        #f)))))))))))))
+                             (let ((st (state-with-scope st (new-scope))))
+                               (mplus
+                                ((add-model m (car SM))
+                                 (state (state-S st) (state-C st) '()))
+                                (lambda () (if get-next-model?
+                                          (loop (cons m ms))
+                                          #f))))))))))))))
