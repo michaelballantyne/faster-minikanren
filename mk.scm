@@ -391,7 +391,7 @@
     ((_ n (q) g0 g ...)
      (take n
        (inc
-         ((fresh (q) g0 g ...
+         ((fresh (q) g0 g ... z/purge
             (lambdag@ (st)
               (let ((st (state-with-scope st nonlocal-scope)))
                 (let ((z ((reify q) st)))
