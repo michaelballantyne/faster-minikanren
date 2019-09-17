@@ -183,17 +183,18 @@
 ;   C - the constraint store
 
 (define state
-  (lambda (S C)
-    (cons S C)))
+  (lambda (S C M)
+    (list S C M)))
 
 (define state-S (lambda (st) (car st)))
-(define state-C (lambda (st) (cdr st)))
+(define state-C (lambda (st) (cadr st)))
+(define state-M (lambda (st) (caddr st)))
 
-(define empty-state (state empty-subst empty-C))
+(define empty-state (state empty-subst empty-C '()))
 
 (define state-with-scope
   (lambda (st new-scope)
-    (state (subst-with-scope (state-S st) new-scope) (state-C st))))
+    (state (subst-with-scope (state-S st) new-scope) (state-C st) (state-M st))))
 
 ; Unification
 
@@ -508,7 +509,7 @@
     (lambdag@ (st)
       (let-values (((S added) (unify u v (state-S st))))
         (if S
-          (and-foldl update-constraints (state S (state-C st)) added)
+          (and-foldl update-constraints (state S (state-C st) (state-M st)) added)
           #f)))))
 
 
