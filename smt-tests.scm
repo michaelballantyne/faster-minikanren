@@ -32,6 +32,15 @@
       (z/assert `(= ,a (+ ,b ,b)))))
   '((4 2) (2 1)))
 
+(test "unif"
+  (run 2 (q)
+    (fresh (a b)
+      (== q `(,a ,b))
+      (z/assert `(> ,a 0))
+      (== b 2)
+      (== b a)))
+  '((2 2)))
+
 (test "faco-0"
   (run* (q)
     (fresh (out)
