@@ -36,7 +36,11 @@
 
 (define decls '())
 (define undeclared?
-  (lambda (ds) (if (null? ds) (lambda (x) #t) (lambda (x) (and (not (memq x ds)) (not (memq x decls)))))))
+  (lambda (x)
+    (let ((r (not (memq x decls))))
+      (when r
+        (set! decls (cons x decls)))
+      r)))
 
 (define (range a b)
   (if (>= a b) '() (cons a (range (1+ a) b))))
@@ -74,11 +78,8 @@
                (ds (filter-redundant-declares ds ds))
                (M (append ds R))
                (_ (set! decls (append (map cadr ds) decls)))
-               (dc (map (lambda (x)
-                          (set! decls (cons x decls))
-                          `(declare-fun ,x () Int))
-                        (filter (undeclared? decls)
-                                (map reify-v-name vs)))))
+               (dc (map (lambda (x) `(declare-fun ,x () Int))
+                        (filter undeclared? (map reify-v-name vs)))))
           (list
            'legacy
            (append
@@ -205,20 +206,20 @@
     (let ((M (state-M st)))
       (if (null? M)
           st
-          (let ([a (last-assumption (state-M st))])
-            (if (not (check-sat-assuming a '()))
-                #f
-                (let ((rs (map (lambda (x) (cons (reify-v-name x) x)) (cdr (assq a relevant-vars)))))
-                  ((let loop ()
-                     (lambdag@ (st)
-                       (let ((m (get-model-inc)))
-                         (let ((m (filter (lambda (x) (assq (car x) rs)) m)))
-                           (let ((st (state-with-scope st (new-scope))))
-                             (mplus*
-                              ((add-model m rs)
-                               (state (state-S st) (state-C st) '()))
-                              (bind*
-                               st
-                               (assert-neg-model m)
-                               (loop))))))))
-                   st))))))))
+          (let* ([a (last-assumption (state-M st))]
+                 [rs (map (lambda (x) (cons (reify-v-name x) x)) (cdr (assq a relevant-vars)))])
+            ((let loop ()
+               (lambdag@ (st)
+                 (if (not (check-sat-assuming a '()))
+                     #f
+                     (let ((m (get-model-inc)))
+                       (let ((m (filter (lambda (x) (assq (car x) rs)) m)))
+                         (let ((st (state-with-scope st (new-scope))))
+                           (mplus*
+                            ((add-model m rs)
+                             (state (state-S st) (state-C st) '()))
+                            (bind*
+                             st
+                             (assert-neg-model m)
+                             (loop)))))))))
+             st))))))

@@ -22,6 +22,16 @@
       ((z/assert `(= ,q 2)))))
   '(1 2))
 
+(test "join"
+  (run 2 (q)
+    (fresh (a b)
+      (== q `(,a ,b))
+      (conde
+        ((== a 4))
+        ((== a 2)))
+      (z/assert `(= ,a (+ ,b ,b)))))
+  '((4 2) (2 1)))
+
 (test "faco-0"
   (run* (q)
     (fresh (out)
@@ -36,10 +46,10 @@
       (== q out)))
   '(1))
 
-  (run 7 (q)
-    (fresh (n out)
-      (faco n out)
-      (== q `(,n ,out))))
+(run 7 (q)
+  (fresh (n out)
+    (faco n out)
+    (== q `(,n ,out))))
 
 (run 7 (q)
   (fresh (n out)
