@@ -44,47 +44,51 @@
 (define map-to-list
   (lambda (S) S))
 
-(define (is-reified-var? x)
-  (and (symbol? x)
-       (let ((s (symbol->string x)))
-         (and (> (string-length s) 2)
-              (eq? (string-ref s 0) #\_)
-              (eq? (string-ref s 1) #\.)))))
-
 (define m-subst-map empty-subst-map)
+(define (reify-v-name v)
+  (string->symbol (format #f "_v~d" (var-idx v))))
+
+(define reify-M
+  (lambda (vs S)
+    (if (null? vs)
+        S
+        (let ((S (reify-M (cdr vs) S))
+              (v (car vs)))
+          (if (eq? unbound (subst-map-lookup v S))
+              (subst-map-add S v (reify-v-name v))
+              S)))))
 (define z/reify-SM
-  (lambda (M)
-    (lambda (st)
-      (let* ((S (state-S st))
-             (M (walk* (reverse M) S))
-             (S (reify-S M (subst
-                            ;; (map (lambda (x)
-                            ;;        (if (not (is-reified-var? (walk (walk (car x) S) (subst m-subst-map nonlocal-scope)))) (cons (var nonlocal-scope) (cdr x)) x))
-                                 m-subst-map
-                                 ;;)
-                            nonlocal-scope)))
-             (_ (set! m-subst-map (filter (lambda (x) (is-reified-var? (cdr x))) (subst-map S))))
-             (M (walk* M S))
-             (dd-M (partition declare-datatypes? M))
-             (dd (car dd-M))
-             (M (cdr dd-M))
-             (ds-R (partition declares? M))
-             (ds (car ds-R))
-             (R (cdr ds-R))
-             (ds (filter-redundant-declares ds ds))
-             (M (append ds R))
-             (S (map-to-list (subst-map S)))
-             (_ (set! decls (append (map cadr ds) decls)))
-             (dc (map (lambda (x)
-                        (set! decls (cons x decls))
-                        `(declare-fun ,x () Int))
-                      (filter (undeclared? decls) (map cdr S)))))
-        (cons
-         (map (lambda (x) (cons (cdr x) (car x))) S)
-         (append
-          dd
-          dc
-          M))))))
+  (lambda (M . args)
+    (let ((no_walk? (and (not (null? args)) (car args))))
+      (lambda (st)
+        (let* ((S (state-S st))
+               (M (reverse M))
+               (M (if no_walk? M (walk* M S)))
+               (vs (vars M '()))
+               (S (reify-M vs m-subst-map))
+               (_ (set! m-subst-map S))
+               (M (walk* M (subst S nonlocal-scope)))
+               (dd-M (partition declare-datatypes? M))
+               (dd (car dd-M))
+               (M (cdr dd-M))
+               (ds-R (partition declares? M))
+               (ds (car ds-R))
+               (R (cdr ds-R))
+               (ds (filter-redundant-declares ds ds))
+               (M (append ds R))
+               (S (map-to-list S))
+               (_ (set! decls (append (map cadr ds) decls)))
+               (dc (map (lambda (x)
+                          (set! decls (cons x decls))
+                          `(declare-fun ,x () Int))
+                        (filter (undeclared? decls) (map cdr S)))))
+          (list
+           (map (lambda (x) (cons (cdr x) (car x))) S)
+           (append
+            dd
+            dc
+            M)
+           vs))))))
 
 (define (check-sat-assuming a xs)
   (call-z3 `(,@xs (check-sat-assuming (,a))))
@@ -97,12 +101,37 @@
           (cons (car xs) '())
           (cons (car xs) (take-until p (cdr xs))))))
 
-(define (z/check a)
+(define z/varo
+  (lambda (u)
+    (lambdag@ (st)
+      (let ((term (walk u (state-S st))))
+        (if (var? term)
+            (let* ((c (lookup-c term st))
+                   (M (c-M c)))
+              (if M st
+                  (set-c term (c-with-M c #t) st)))
+            st)))))
+
+
+(define (z/check a no_walk?)
   (lambdag@ (st)
-    (if (check-sat-assuming a (cdr ((z/reify-SM (take-until (lambda (x) (equal? x `(declare-const ,a Bool)))
-                                                            (state-M st))) st)))
-        st
-        #f)))
+    (let ((r ((z/reify-SM (take-until (lambda (x) (equal? x `(declare-const ,a Bool)))
+                                      (state-M st))
+                          no_walk?) st)))
+      (if (check-sat-assuming a (cadr r))
+          (begin
+            (let ((p (assq a relevant-vars)))
+              (set-cdr! p (append (caddr r) (cdr p))))
+            ((let loop ((vs (caddr r)))
+               (lambdag@ (st)
+                 (if (null? vs)
+                     st
+                     (bind*
+                      st
+                      (z/varo (car vs))
+                      (loop (cdr vs))))))
+             st))
+          #f))))
 
 (define z/
   (lambda (line)
@@ -113,7 +142,7 @@
 (define assumption-count 0)
 (define (fresh-assumption)
   (set! assumption-count (+ assumption-count 1))
-  (string->symbol (format #f "a~d" assumption-count)))
+  (string->symbol (format #f "_a~d" assumption-count)))
 
 (define (last-assumption m)
   (let ((r (filter (lambda (x) (and (pair? x)
@@ -126,22 +155,28 @@
         (cadr (cadr (car r))))))
 
 (define z/assert
-  (lambda (e)
-    (lambdag@ (st)
-      (let ((a1 (fresh-assumption))
-            (a2 (fresh-assumption)))
-        (let ((a0 (last-assumption (state-M st))))
-          ((fresh ()
-             (z/ `(declare-const ,a2 Bool))
-             (z/ `(declare-const ,a1 Bool))
-             (z/ `(assert (=> ,a1 ,e)))
-             (z/ `(assert (=> ,a2 (and ,a0 ,a1))))
-             (z/check a2))
-           st))))))
+  (lambda (e . args)
+    (let ((no_walk? (and (not (null? args)) (car args))))
+      (lambdag@ (st)
+        (let ((a1 (fresh-assumption))
+              (a2 (fresh-assumption)))
+          (let ((a0 (last-assumption (state-M st))))
+            (let ((rs (if (eq? a0 'true) '()  (cdr (assq a0 relevant-vars)))))
+              (set! relevant-vars (cons (cons a2 rs)
+                                        relevant-vars))
+              (bind*
+               st
+               (z/ `(declare-const ,a2 Bool))
+               (z/ `(declare-const ,a1 Bool))
+               (z/ `(assert (=> ,a1 ,e)))
+               (z/ `(assert (=> ,a2 (and ,a0 ,a1))))
+               (z/check a2 no_walk?)))))))))
 
+(define relevant-vars '())
 (define (z/reset!)
   (call-z3 '((reset)))
   (set! decls '())
+  (set! relevant-vars '())
   (set! assumption-count 0)
   (set! m-subst-map empty-subst-map))
 
@@ -179,12 +214,17 @@
                 #f
                 (if (null? (car SM))
                     (state (state-S st) (state-C st) '())
-                    ((let loop ()
-                        (lambdag@ (st)
-                          (let ((m (get-model-inc)))
-                            ((conde
-                                ((add-model m (car SM)))
-                                ((assert-neg-model m)
-                                 (loop)))
-                             st))))
-                     st))))))))
+                    (let ((rs (map reify-v-name (cdr (assq a relevant-vars)))))
+                      ((let loop ()
+                         (lambdag@ (st)
+                           (let ((m (get-model-inc)))
+                             (let ((m (filter (lambda (x) (memq (car x) rs)) m)))
+                               (let ((st (state-with-scope st (new-scope))))
+                                 (mplus*
+                                  ((add-model m (car SM))
+                                   (state (state-S st) (state-C st) '()))
+                                  (bind*
+                                   st
+                                   (assert-neg-model m)
+                                   (loop))))))))
+                       st)))))))))

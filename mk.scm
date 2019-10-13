@@ -142,7 +142,7 @@
 ;   A - list of absento constraints. Each constraint is a term.
 ;         The list contains no duplicates.
 
-(define empty-c `(#f () ()))
+(define empty-c `(#f () () #f))
 
 (define c-T
   (lambda (c)
@@ -156,17 +156,25 @@
   (lambda (c)
     (caddr c)))
 
+(define c-M
+  (lambda (c)
+    (cadddr c)))
+
 (define c-with-T
   (lambda (c T)
-    (list T (c-D c) (c-A c))))
+    (list T (c-D c) (c-A c) (c-M c))))
 
 (define c-with-D
   (lambda (c D)
-    (list (c-T c) D (c-A c))))
+    (list (c-T c) D (c-A c) (c-M c))))
 
 (define c-with-A
   (lambda (c A)
-    (list (c-T c) (c-D c) A)))
+    (list (c-T c) (c-D c) A (c-M c))))
+
+(define c-with-M
+  (lambda (c M)
+    (list (c-T c) (c-D c) (c-A c) M)))
 
 ; Constraint store object.
 ; Mapping of representative variable to constraint record. Constraints
@@ -529,8 +537,11 @@
               (list (symbolo (rhs a)))
               '())
             (if (eq? (c-T old-c) 'numbero)
-              (list (numbero (rhs a)))
-              '())
+                (list (numbero (rhs a)))
+                '())
+            (if (c-M old-c)
+                (list (z/assert (list '= (lhs a) (rhs a)) #t))
+                '())
             (map (lambda (atom) (absento atom (rhs a))) (c-A old-c))
             (map (lambda (d) (=/=* d)) (c-D old-c)))))))))
 
