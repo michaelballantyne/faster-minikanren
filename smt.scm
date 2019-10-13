@@ -131,7 +131,7 @@
 
 (define (z/check a no_walk?)
   (lambdag@ (st)
-    (let ((r ((z/reify-SM (take-until (lambda (x) (equal? x `(push)))
+    (let ((r ((z/reify-SM (take-until (lambda (x) (equal? x `(declare-const ,a Bool)))
                                       (state-M st))
                           no_walk?) st)))
       (if (check-sat-assuming a (cadr r))
@@ -182,9 +182,8 @@
                                         relevant-vars))
               (bind*
                st
-               (z/ '(push))
-               (z/ `(declare-const ,a1 Bool))
                (z/ `(declare-const ,a2 Bool))
+               (z/ `(declare-const ,a1 Bool))
                (z/ `(assert (=> ,a1 ,e)))
                (z/ `(assert (=> ,a2 (and ,a0 ,a1))))
                (z/check a2 no_walk?)))))))))
