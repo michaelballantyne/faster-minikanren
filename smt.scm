@@ -34,8 +34,9 @@
          (cdr ds)
          (cons (car ds) (filter-redundant-declare (car ds) es))))))
 
+(define decls '())
 (define undeclared?
-  (lambda (ds) (if (null? ds) (lambda (x) #t) (lambda (x) (not (memq x ds))))))
+  (lambda (ds) (if (null? ds) (lambda (x) #t) (lambda (x) (and (not (memq x ds)) (not (memq x decls)))))))
 
 (define (range a b)
   (if (>= a b) '() (cons a (range (1+ a) b))))
@@ -43,12 +44,26 @@
 (define map-to-list
   (lambda (S) S))
 
+(define (is-reified-var? x)
+  (and (symbol? x)
+       (let ((s (symbol->string x)))
+         (and (> (string-length s) 2)
+              (eq? (string-ref s 0) #\_)
+              (eq? (string-ref s 1) #\.)))))
+
+(define m-subst-map empty-subst-map)
 (define z/reify-SM
   (lambda (M)
     (lambda (st)
       (let* ((S (state-S st))
              (M (walk* (reverse M) S))
-             (S (reify-S M (subst empty-subst-map nonlocal-scope)))
+             (S (reify-S M (subst
+                            ;; (map (lambda (x)
+                            ;;        (if (not (is-reified-var? (walk (walk (car x) S) (subst m-subst-map nonlocal-scope)))) (cons (var nonlocal-scope) (cdr x)) x))
+                                 m-subst-map
+                                 ;;)
+                            nonlocal-scope)))
+             (_ (set! m-subst-map (filter (lambda (x) (is-reified-var? (cdr x))) (subst-map S))))
              (M (walk* M S))
              (dd-M (partition declare-datatypes? M))
              (dd (car dd-M))
@@ -58,20 +73,34 @@
              (R (cdr ds-R))
              (ds (filter-redundant-declares ds ds))
              (M (append ds R))
-             (S (map-to-list (subst-map S))))
+             (S (map-to-list (subst-map S)))
+             (_ (set! decls (append (map cadr ds) decls)))
+             (dc (map (lambda (x)
+                        (set! decls (cons x decls))
+                        `(declare-fun ,x () Int))
+                      (filter (undeclared? decls) (map cdr S)))))
         (cons
          (map (lambda (x) (cons (cdr x) (car x))) S)
          (append
           dd
-          (map (lambda (x) `(declare-fun ,x () Int))
-               (filter (undeclared? (map cadr ds)) (map cdr S)))
+          dc
           M))))))
 
-(define defer-smt-checks #f)
+(define (check-sat-assuming a xs)
+  (call-z3 `(,@xs (check-sat-assuming (,a))))
+  (read-sat))
 
-(define z/check
+(define (take-until p xs)
+  (if (null? xs)
+      '()
+      (if (p (car xs))
+          (cons (car xs) '())
+          (cons (car xs) (take-until p (cdr xs))))))
+
+(define (z/check a)
   (lambdag@ (st)
-    (if (or defer-smt-checks (check-sat (cdr ((z/reify-SM (state-M st)) st))))
+    (if (check-sat-assuming a (cdr ((z/reify-SM (take-until (lambda (x) (equal? x `(declare-const ,a Bool)))
+                                                            (state-M st))) st)))
         st
         #f)))
 
@@ -81,40 +110,81 @@
       (let ((M (cons line (state-M st))))
         (state (state-S st) (state-C st) M)))))
 
+(define assumption-count 0)
+(define (fresh-assumption)
+  (set! assumption-count (+ assumption-count 1))
+  (string->symbol (format #f "a~d" assumption-count)))
+
+(define (last-assumption m)
+  (let ((r (filter (lambda (x) (and (pair? x)
+                               (eq? 'assert (car x))
+                               (pair? (cadr x))
+                               (eq? (car (cadr x)) '=>)))
+                   m)))
+    (if (null? r)
+        'true
+        (cadr (cadr (car r))))))
+
 (define z/assert
   (lambda (e)
-    (fresh ()
-      (z/ `(assert ,e))
-      z/check)))
+    (lambdag@ (st)
+      (let ((a1 (fresh-assumption))
+            (a2 (fresh-assumption)))
+        (let ((a0 (last-assumption (state-M st))))
+          ((fresh ()
+             (z/ `(declare-const ,a2 Bool))
+             (z/ `(declare-const ,a1 Bool))
+             (z/ `(assert (=> ,a1 ,e)))
+             (z/ `(assert (=> ,a2 (and ,a0 ,a1))))
+             (z/check a2))
+           st))))))
+
+(define (z/reset!)
+  (call-z3 '((reset)))
+  (set! decls '())
+  (set! assumption-count 0)
+  (set! m-subst-map empty-subst-map))
 
 (define add-model
   (lambda (m s)
-    (lambda (st)
+    (lambdag@ (st)
       (if (null? m)
           st
           (bind
-           ((== (cdr (assq (caar m) s)) (cdar m)) st)
+           (let ((b (assq (caar m) s)))
+             (if b
+                 ((== (cdr b) (cdar m)) st)
+                 st))
            (add-model (cdr m) s))))))
 
-(define get-next-model? #t)
+(define assert-neg-model
+  (lambda (m)
+    (let* ([m
+            (filter (lambda (x) ; ignoring functions
+                      (or (number? (cdr x))
+                          (symbol? (cdr x)) ; for bitvectors
+                          )) m)])
+      (if (null? m)
+          fail
+          (z/assert (cadr (neg-model m)))))))
 
 (define z/purge
   (lambdag@ (st)
     (let ((M (state-M st)))
       (if (null? M)
           st
-          (let ([SM ((z/reify-SM M) st)])
-            (if (not (check-sat (cdr SM)))
+          (let ([a (last-assumption (state-M st))]
+                [SM ((z/reify-SM M) st)])
+            (if (not (check-sat-assuming a '()))
                 #f
                 (if (null? (car SM))
                     (state (state-S st) (state-C st) '())
-                    (let loop ((ms '()))
-                      (let ((m (get-next-model (cdr SM) ms)))
-                        (and m
-                             (let ((st (state-with-scope st (new-scope))))
-                               (mplus
-                                ((add-model m (car SM))
-                                 (state (state-S st) (state-C st) '()))
-                                (lambda () (if get-next-model?
-                                          (loop (cons m ms))
-                                          #f))))))))))))))
+                    ((let loop ()
+                        (lambdag@ (st)
+                          (let ((m (get-model-inc)))
+                            ((conde
+                                ((add-model m (car SM)))
+                                ((assert-neg-model m)
+                                 (loop)))
+                             st))))
+                     st))))))))

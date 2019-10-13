@@ -389,14 +389,16 @@
 (define-syntax run
   (syntax-rules ()
     ((_ n (q) g0 g ...)
-     (take n
-       (inc
-         ((fresh (q) g0 g ... z/purge
-            (lambdag@ (st)
-              (let ((st (state-with-scope st nonlocal-scope)))
-                (let ((z ((reify q) st)))
-                  (choice z (lambda () (lambda () #f)))))))
-          empty-state))))
+     (begin
+       (z/reset!)
+       (take n
+             (inc
+              ((fresh (q) g0 g ... z/purge
+                      (lambdag@ (st)
+                        (let ((st (state-with-scope st nonlocal-scope)))
+                          (let ((z ((reify q) st)))
+                            (choice z (lambda () (lambda () #f)))))))
+               empty-state)))))
     ((_ n (q0 q1 q ...) g0 g ...)
      (run n (x)
        (fresh (q0 q1 q ...)
