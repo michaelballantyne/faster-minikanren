@@ -41,6 +41,15 @@
       (== b a)))
   '((2 2)))
 
+(test "unif2"
+  (run 2 (q)
+    (fresh (a b)
+      (== q `(,a ,b))
+      (z/assert `(> ,a 0))
+      (== b a)
+      (== b 2)))
+  '((2 2)))
+
 (test "faco-0"
   (run* (q)
     (fresh (out)
