@@ -223,20 +223,22 @@
       (if (null? M)
           st
           (let ([a (last-assumption (state-M st))])
-            (if (not (check-sat-assuming a '()))
-                #f
-                (let ([rs (map (lambda (x) (cons (reify-v-name x) x)) (cdr (assq a relevant-vars)))])
-                  ((let loop ()
-                     (lambdag@ (st)
-                       (let ((m (get-model-inc)))
-                         (let ((m (map (lambda (x) (cons (cdr (assq (car x) rs)) (cdr x))) (filter (lambda (x) (assq (car x) rs)) m))))
-                           (let ((st (state-with-scope st (new-scope))))
-                             (mplus*
-                              (bind*
-                               (state-with-M st '())
-                               (add-model m))
-                              (bind*
-                               st
-                               (assert-neg-model m)
-                               (loop))))))))
-                   st))))))))
+            (if (eq? a 'true)
+                st
+                (if (not (check-sat-assuming a '()))
+                    #f
+                    (let ([rs (map (lambda (x) (cons (reify-v-name x) x)) (cdr (assq a relevant-vars)))])
+                      ((let loop ()
+                         (lambdag@ (st)
+                           (let ((m (get-model-inc)))
+                             (let ((m (map (lambda (x) (cons (cdr (assq (car x) rs)) (cdr x))) (filter (lambda (x) (assq (car x) rs)) m))))
+                               (let ((st (state-with-scope st (new-scope))))
+                                 (mplus*
+                                  (bind*
+                                   (state-with-M st '())
+                                   (add-model m))
+                                  (bind*
+                                   st
+                                   (assert-neg-model m)
+                                   (loop))))))))
+                       st)))))))))
