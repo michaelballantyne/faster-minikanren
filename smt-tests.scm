@@ -30,13 +30,29 @@
   '(1))
 
 (test "faco-1"
-  (run 1 (q)
+  (run* (q)
     (fresh (out)
       (faco 1 out)
       (== q out)))
   '(1))
 
-(run 3 (q)
+  (run 7 (q)
+    (fresh (n out)
+      (faco n out)
+      (== q `(,n ,out))))
+
+(run 7 (q)
   (fresh (n out)
     (facto n out)
     (== q `(,n ,out))))
+
+(test "evalo-backwards-fib-quoted-6"
+  (run 1 (q)
+    (evalo `(letrec ((f
+                      (lambda (n)
+                        (if (< n 0) #f
+                            (if (< n 2) n
+                                (+ (f (- n 1)) (f (- n 2))))))))
+              (f ',q))
+           8))
+  '(6))
