@@ -133,7 +133,7 @@
 
 (define subst-map-eq? eq?)
 
-
+#|
 ; Alternative (unused) substitution representation, using alists.
 ; Performance with the tries is usually about the same and
 ; can be much better for huge substitutions.
@@ -155,7 +155,7 @@
   (cons (cons var val) S))
 
 (define subst-map-eq? eq?)
-
+|#
 
 
 ; Constraint store representation
