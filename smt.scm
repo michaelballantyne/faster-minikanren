@@ -153,7 +153,7 @@
   (lambda (line)
     (lambdag@ (st)
       (let ((M (cons line (state-M st))))
-        (state (state-S st) (state-C st) M)))))
+        (state-with-M st M)))))
 
 (define assumption-count 0)
 (define (fresh-assumption)
@@ -233,7 +233,7 @@
                            (let ((st (state-with-scope st (new-scope))))
                              (mplus*
                               (bind*
-                               (state (state-S st) (state-C st) '())
+                               (state-with-M st '())
                                (add-model m))
                               (bind*
                                st
