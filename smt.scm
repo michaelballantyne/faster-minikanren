@@ -157,7 +157,7 @@
         (let ((M (append (reverse lines) (state-M st))))
           (state-with-M st M))))))
 (define (replay-if-needed a m)
-  (let ((r (take-while (lambda (x) (not (member x local-buffer))) m)))
+  (let ((r (filter (lambda (x) (not (member x local-buffer))) m)))
     (unless (null? r)
       (let ((lines (reverse r)))
         (let ((new-decls  (filter (lambda (x)
