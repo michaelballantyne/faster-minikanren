@@ -94,16 +94,15 @@
                (ds (car ds-R))
                (R (cdr ds-R))
                (ds (filter-redundant-declares ds ds))
-               (M (append ds R))
                (_ (set! decls (append (map cadr ds) decls)))
                (dc (map (lambda (x) `(declare-fun ,x () Int))
                         (filter undeclared? (map reify-v-name vs)))))
           (list
-           'legacy
            (append
             dd
             dc
-            M)
+            ds)
+           R
            vs))))))
 
 (define (get-assumptions a)
@@ -113,8 +112,8 @@
                b
                `(not ,b)))
          (reverse all-assumptions))))
-(define (check-sat-assuming a xs)
-  (call-z3 `(,@xs (check-sat-assuming ,(get-assumptions a))))
+(define (check-sat-assuming a)
+  (call-z3 `((check-sat-assuming ,(get-assumptions a))))
   (read-sat))
 
 (define (take-until p xs)
@@ -135,32 +134,45 @@
                   (set-c term (c-with-M c #t) st)))
             st)))))
 
-
-(define (z/check a no_walk?)
-  (lambdag@ (st)
-    (let ((r ((z/reify-SM (take-until (lambda (x) (equal? x `(declare-const ,a Bool)))
-                                      (state-M st))
-                          no_walk?) st)))
-      (if (check-sat-assuming a (cadr r))
-          (begin
-            (let ((p (assq a relevant-vars)))
-              (set-cdr! p (append (caddr r) (cdr p))))
-            ((let loop ((vs (caddr r)))
-               (lambdag@ (st)
-                 (if (null? vs)
-                     st
-                     (bind*
-                      st
-                      (z/varo (car vs))
-                      (loop (cdr vs))))))
-             st))
-          #f))))
-
-(define z/
-  (lambda (line)
+(define global-buffer '())
+(define z/global
+  (lambda (lines)
+    (call-z3 lines)
+    (set! global-buffer (append lines global-buffer))))
+(define z/local
+  (lambda (lines)
+    (call-z3 lines)
     (lambdag@ (st)
-      (let ((M (cons line (state-M st))))
+      (let ((M (append (reverse lines) (state-M st))))
         (state-with-M st M)))))
+(define (z/check m a no_walk?)
+  (lambdag@ (st)
+    (let ((r ((z/reify-SM m no_walk?) st)))
+      (z/global (car r))
+      (bind*
+       st
+       (z/local (cadr r))
+       (lambdag@ (st)
+         (if (check-sat-assuming a)
+             (begin
+               (let ((p (assq a relevant-vars)))
+                 (set-cdr! p (append (caddr r) (cdr p))))
+               ((let loop ((vs (caddr r)))
+                  (lambdag@ (st)
+                    (if (null? vs)
+                        st
+                        (bind*
+                         st
+                         (z/varo (car vs))
+                         (loop (cdr vs))))))
+                st))
+             #f))))))
+
+(define (z/ line)
+  (lambdag@ (st)
+    (begin
+      (z/global (list line))
+      st)))
 
 (define assumption-count 0)
 (define (fresh-assumption)
@@ -190,9 +202,10 @@
               (set! all-assumptions (cons a1 all-assumptions))
               (bind*
                st
-               (z/ `(declare-const ,a1 Bool))
-               (z/ `(assert (=> ,a1 ,e)))
-               (z/check a1 no_walk?)))))))))
+               (z/check `((assert (=> ,a1 ,e))
+                          (declare-const ,a1 Bool))
+                        a1
+                        no_walk?)))))))))
 
 (define relevant-vars '())
 (define assumption-chains '())
@@ -204,7 +217,8 @@
   (set! assumption-chains '())
   (set! all-assumptions '())
   (set! assumption-count 0)
-  (set! m-subst-map empty-subst-map))
+  (set! m-subst-map empty-subst-map)
+  (set! global-buffer '()))
 
 (define add-model
   (lambda (m)
@@ -235,7 +249,7 @@
           (let ([a (last-assumption (state-M st))])
             (if (eq? a 'true)
                 st
-                (if (not (check-sat-assuming a '()))
+                (if (not (check-sat-assuming a))
                     #f
                     (let ([rs (map (lambda (x) (cons (reify-v-name x) x)) (cdr (assq a relevant-vars)))])
                       ((let loop ()
