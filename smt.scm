@@ -112,7 +112,8 @@
                b
                `(not ,b)))
          (reverse all-assumptions))))
-(define (check-sat-assuming a)
+(define (check-sat-assuming a m)
+  (replay-if-needed m)
   (call-z3 `((check-sat-assuming ,(get-assumptions a))))
   (read-sat))
 
@@ -120,8 +121,15 @@
   (if (null? xs)
       '()
       (if (p (car xs))
-          (cons (car xs) '())
+          '()
           (cons (car xs) (take-until p (cdr xs))))))
+
+(define (take-while p xs)
+  (if (null? xs)
+      '()
+      (if (p (car xs))
+          (cons (car xs) (take-while p (cdr xs)))
+          '())))
 
 (define z/varo
   (lambda (u)
@@ -138,13 +146,25 @@
 (define z/global
   (lambda (lines)
     (call-z3 lines)
-    (set! global-buffer (append lines global-buffer))))
+    (set! global-buffer (append global-buffer lines))))
+(define local-buffer '())
 (define z/local
   (lambda (lines)
-    (call-z3 lines)
     (lambdag@ (st)
-      (let ((M (append (reverse lines) (state-M st))))
-        (state-with-M st M)))))
+      (begin
+        (replay-if-needed (state-M st))
+        (call-z3 lines)
+        (set! local-buffer (append local-buffer lines))
+        (let ((M (append (reverse lines) (state-M st))))
+          (state-with-M st M))))))
+(define (replay-if-needed m)
+  (let ((r (take-while (lambda (x) (not (member x local-buffer))) m)))
+    (unless (null? r)
+      (let ((lines (reverse r)))
+        ;;(printf "adding lines ~a\n" lines)
+        (call-z3 lines)
+        (set! local-buffer (append local-buffer lines))))))
+
 (define (z/check m a no_walk?)
   (lambdag@ (st)
     (let ((r ((z/reify-SM m no_walk?) st)))
@@ -153,7 +173,7 @@
        st
        (z/local (cadr r))
        (lambdag@ (st)
-         (if (check-sat-assuming a)
+         (if (check-sat-assuming a (state-M st))
              (begin
                (let ((p (assq a relevant-vars)))
                  (set-cdr! p (append (caddr r) (cdr p))))
@@ -176,6 +196,10 @@
 
 (define assumption-count 0)
 (define (fresh-assumption)
+  (when (and (= (remainder assumption-count 1000) 0)
+             (> assumption-count 0))
+    (printf "gc z3...\n")
+    (z/gc!))
   (set! assumption-count (+ assumption-count 1))
   (string->symbol (format #f "_a~d" assumption-count)))
 
@@ -218,7 +242,12 @@
   (set! all-assumptions '())
   (set! assumption-count 0)
   (set! m-subst-map empty-subst-map)
-  (set! global-buffer '()))
+  (set! global-buffer '())
+  (set! local-buffer '()))
+(define (z/gc!)
+  (call-z3 '((reset)))
+  (call-z3 global-buffer)
+  (set! local-buffer '()))
 
 (define add-model
   (lambda (m)
@@ -249,7 +278,7 @@
           (let ([a (last-assumption (state-M st))])
             (if (eq? a 'true)
                 st
-                (if (not (check-sat-assuming a))
+                (if (not (check-sat-assuming a (state-M st)))
                     #f
                     (let ([rs (map (lambda (x) (cons (reify-v-name x) x)) (cdr (assq a relevant-vars)))])
                       ((let loop ()
