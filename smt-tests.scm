@@ -6,6 +6,7 @@
 ;;(load "../clpsmt-miniKanren/z3-driver.scm")
 ;;(load "../clpsmt-miniKanren/cvc4-driver.scm")
 (load "../clpsmt-miniKanren/z3-server.scm")
+;;(load "../clpsmt-miniKanren/cvc4-server.scm")
 (load "../clpsmt-miniKanren/talk.scm")
 (load "../clpsmt-miniKanren/radi-tests.scm")
 (load "../clpsmt-miniKanren/radiw-concrete-tests.scm")
