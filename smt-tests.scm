@@ -87,3 +87,17 @@
               (f ',q))
            8))
   '(6))
+
+(test "fail-1"
+  (run 1 (x)
+    (=/= x 2)
+    (z/assert `(> ,x 1))
+    (z/assert `(< ,x 3)))
+  '())
+
+(test "fail-2"
+  (run 1 (x)
+    (absento 2 x)
+    (z/assert `(> ,x 1))
+    (z/assert `(< ,x 3)))
+  '())
