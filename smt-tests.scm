@@ -12,6 +12,8 @@
 ;;(load "../clpsmt-miniKanren/full-abstract-interp-extended-tests.scm")
 (load "../clpsmt-miniKanren/rsa.scm")
 (load "../clpsmt-miniKanren/property-based-synthesis-tests.scm")
+;;(load "../clpsmt-miniKanren/mk.scm")
+;;(load "../clpsmt-miniKanren/z3-driver.scm")
 ;;slow
 ;;(load "../clpsmt-miniKanren/twenty-four-puzzle.scm")
 
