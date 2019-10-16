@@ -176,8 +176,8 @@
                    (undeclared-rs (map (lambda (x) `(declare-const ,x Int)) rs))
                    (actual-lines (append undeclared-rs actual-lines)))
               (set! all-assumptions (append (map cadr undeclared-assumptions) all-assumptions))
-              (call-z3 actual-lines)
-              (set! local-buffer (append local-buffer actual-lines)))))))))
+              (set! local-buffer (append local-buffer actual-lines))
+              (call-z3 actual-lines))))))))
 
 (define (z/check m a no_walk?)
   (lambdag@ (st)
