@@ -101,3 +101,15 @@
     (z/assert `(> ,x 1))
     (z/assert `(< ,x 3)))
   '())
+
+(test "fail-3"
+  (run 2 (x)
+    (=/= x 2)
+    (z/assert `(= 4 (* ,x ,x))))
+  '(-2))
+
+(test "real-1"
+  (run 1 (x)
+    (z/ `(declare-const ,x Real))
+    (z/assert `(= 4.2 (* 2 ,x))))
+  '(2.1))
