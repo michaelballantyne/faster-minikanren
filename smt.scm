@@ -152,8 +152,8 @@
   (lambda (lines)
     (lambdag@ (st)
       (begin
-        (call-z3 lines)
         (set! local-buffer (append local-buffer lines))
+        (call-z3 lines)
         (let ((M (append (reverse lines) (state-M st))))
           (state-with-M st M))))))
 (define (replay-if-needed a m)
@@ -264,8 +264,8 @@
   (call-z3 '((reset)))
   (call-z3 global-buffer)
   (set! decls '())
-  (set! local-buffer '())
-  (set! all-assumptions '()))
+  (set! all-assumptions '())
+  (set! local-buffer '()))
 
 (define add-model
   (lambda (m)
