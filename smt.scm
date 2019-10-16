@@ -189,7 +189,7 @@
          st
          (z/local (cadr r))
          (lambdag@ (st)
-           (if (check-sat-assuming a (state-M st))
+           (if (and a (check-sat-assuming a (state-M st)))
                (begin
                  (let ((p (assq a relevant-vars)))
                    (set-cdr! p (append (caddr r) (cdr p))))
@@ -199,16 +199,14 @@
                           st
                           (bind*
                            st
+                           (numbero (car vs))
                            (z/varo (car vs))
                            (loop (cdr vs))))))
                   st))
-               #f)))))))
+               (if a #f st))))))))
 
 (define (z/ line)
-  (lambdag@ (st)
-    (begin
-      (z/global (list line))
-      st)))
+  (z/check (list line) #f #f))
 
 (define assumption-count 0)
 (define (fresh-assumption)
