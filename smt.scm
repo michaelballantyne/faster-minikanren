@@ -131,15 +131,53 @@
           (cons (car xs) (take-while p (cdr xs)))
           '())))
 
+(define (smt-ok? st x)
+  (let ((x (walk* x st)))
+    (or (number? x)
+        (and (var? x)
+             (let ((c (lookup-c x st)))
+               (c-M c))))))
+
+(define (filter-smt-ok? st D)
+  (filter
+   (lambda (cs)
+     (for-all (lambda (ds)
+                (and (smt-ok? st (car ds)) (smt-ok? st (cdr ds))))
+              cs))
+   D))
+
+(define (add-smt-disequality st D)
+  (let ((as (filter-smt-ok? st D)))
+    (if (not (null? as))
+        (z/assert
+         `(and
+           ,@(map
+              (lambda (cs)
+                `(or
+                  ,@(map
+                     (lambda (ds)
+                       `(not (= ,(car ds) ,(cdr ds))))
+                     cs)))
+              as))
+         #t)
+        (lambdag@ (st) st))))
+
 (define z/varo
   (lambda (u)
     (lambdag@ (st)
       (let ((term (walk u (state-S st))))
         (if (var? term)
             (let* ((c (lookup-c term st))
-                   (M (c-M c)))
-              (if M st
-                  (set-c term (c-with-M c #t) st)))
+                   (M (c-M c))
+                   (D (c-D c)))
+              (bind*
+               st
+               (lambdag@ (st)
+                 (if M st
+                     (set-c term (c-with-M c #t) st)))
+               (if (or M (null? D))
+                   (lambdag@ (st) st)
+                   (lambdag@ (st) ((add-smt-disequality st D) st)))))
             st)))))
 
 (define global-buffer '())

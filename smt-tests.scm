@@ -113,3 +113,48 @@
     (z/ `(declare-const ,x Real))
     (z/assert `(= 4.2 (* 2 ,x))))
   '(2.1))
+
+(test "diseq-0"
+  (run 1 (q)
+    (fresh (x y)
+      (z/assert `(> ,x 0))
+      (z/assert `(> ,y 0))
+      (z/assert `(= ,q (* ,x ,y)))))
+  '(1))
+
+(test "diseq-1"
+  (run 1 (q)
+    (fresh (x y)
+      (=/= x 0)
+      (=/= y 0)
+      (z/assert `(>= ,x 0))
+      (z/assert `(>= ,y 0))
+      (z/assert `(= ,q (* ,x ,y)))))
+  '(1))
+
+
+(test "diseq-2"
+  (run 1 (q)
+    (fresh (x y)
+      (z/assert `(>= ,x 0))
+      (z/assert `(>= ,y 0))
+      (z/assert `(= ,q (* ,x ,y)))
+      (=/= x 0)
+      (=/= y 0)))
+  '(1))
+
+(test "diseq-3"
+  (run 1 (q)
+    (fresh (x y)
+      (=/= x 0)
+      (=/= y 0)
+      (z/assert `(= 0 (* ,x ,y)))))
+  '())
+
+(test "diseq-4"
+  (run 1 (q)
+    (fresh (x y)
+      (z/assert `(= 0 (* ,x ,y)))
+      (=/= x 0)
+      (=/= y 0)))
+  '())
