@@ -206,7 +206,7 @@
                (if a #f st))))))))
 
 (define (z/ line)
-  (z/check (list line) #f #f))
+  (z/check (list line) #f #t))
 
 (define assumption-count 0)
 (define (fresh-assumption)
