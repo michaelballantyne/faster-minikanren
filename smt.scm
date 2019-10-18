@@ -43,11 +43,14 @@
       r)))
 
 (define (range a b)
-  (if (>= a b) '() (cons a (range (1+ a) b))))
+  (if (>= a b) '() (cons a (range (+ 1 a) b))))
 
 (define m-subst-map empty-subst-map)
 (define (reify-v-name v)
-  (string->symbol (format #f "_v~d" (var-idx v))))
+  (string->symbol
+   ;;(format #f "_v~d" (var-idx v))
+   (string-append "_v" (number->string (var-idx v)))
+   ))
 
 (define reify-M
   (lambda (vs S)
@@ -132,7 +135,7 @@
           '())))
 
 (define (smt-ok? st x)
-  (let ((x (walk* x st)))
+  (let ((x (walk* x (state-S st))))
     (or (number? x)
         (and (var? x)
              (let ((c (lookup-c x st)))
@@ -230,7 +233,8 @@
            (if (and a (check-sat-assuming a (state-M st)))
                (begin
                  (let ((p (assq a relevant-vars)))
-                   (set-cdr! p (append (caddr r) (cdr p))))
+                   ;;(set-cdr! p (append (caddr r) (cdr p)))
+                   (set! relevant-vars (cons (cons a (append (caddr r) (cdr p))) (remove p relevant-vars))))
                  ((let loop ((vs (caddr r)))
                     (lambdag@ (st)
                       (if (null? vs)
@@ -253,7 +257,9 @@
     (printf "gc z3...\n")
     (z/gc!))
   (set! assumption-count (+ assumption-count 1))
-  (string->symbol (format #f "_a~d" assumption-count)))
+  (string->symbol ;(format #f "_a~d" assumption-count)
+   (string-append "_a" (number->string assumption-count))
+                  ))
 
 (define (last-assumption m)
   (let ((r (filter (lambda (x) (and (pair? x)

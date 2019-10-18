@@ -3,12 +3,17 @@
 (require racket/list
          racket/include)
 
-(provide run run*
-         == =/=
-         fresh
-         conde
-         symbolo numbero
-         absento)
+(require "../clpsmt-miniKanren/z3-server.rkt")
+
+(provide
+ (all-from-out "../clpsmt-miniKanren/z3-server.rkt")
+ (all-defined-out))
+;; (provide run run*
+;;          == =/=
+;;          fresh
+;;          conde
+;;          symbolo numbero
+;;          absento)
 
 ;; extra stuff for racket
 ;; due mostly to samth
@@ -57,7 +62,7 @@
 
 (define set-c
   (lambda (v c st)
-    (state (state-S st) (hash-set (state-C st) v c))))
+    (state (state-S st) (hash-set (state-C st) v c) (state-M st))))
 
 (define lookup-c
   (lambda (v st)
@@ -65,7 +70,8 @@
 
 (define remove-c
   (lambda (v st)
-    (state (state-S st) (hash-remove (state-C st) v))))
+    (state (state-S st) (hash-remove (state-C st) v) (state-M st))))
 
 
 (include "mk.scm")
+(include "smt.scm")
