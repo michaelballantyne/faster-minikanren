@@ -224,7 +224,7 @@
   (lambdag@ (st)
     (begin
       (replay-if-needed (last-assumption (state-M st)) (state-M st))
-      (let ((r ((z/reify-SM m no_walk?) st)))
+      (let ((r (wrap-neg ((z/reify-SM m no_walk?) st))))
         (z/global (car r))
         (bind*
          st
@@ -270,6 +270,15 @@
     (if (null? r)
         'true
         (cadr (cadr (car r))))))
+
+(define (wrap-neg e)
+  (if (number? e)
+      (if (< e 0)
+	  `(- ,(- e))
+	  e)
+      (if (pair? e)
+	  (cons (wrap-neg (car e)) (wrap-neg (cdr e)))
+	  e)))
 
 (define z/assert
   (lambda (e . args)
