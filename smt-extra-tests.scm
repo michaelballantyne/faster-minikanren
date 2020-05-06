@@ -57,6 +57,7 @@
     (facto n out)
     (== q `(,n ,out))))
 
+(load "../clpsmt-miniKanren/full-interp-with-let.scm")
 (test "evalo-backwards-fib-quoted-6"
   (run 1 (q)
     (evalo `(letrec ((f
