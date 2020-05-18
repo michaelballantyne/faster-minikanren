@@ -42,42 +42,19 @@
         (set! decls (cons x decls)))
       r)))
 
-(define (range a b)
-  (if (>= a b) '() (cons a (range (+ 1 a) b))))
-
-(define m-subst-map empty-subst-map)
+; (Var) -> Symbol
 (define (reify-v-name v)
   (string->symbol
-   ;;(format #f "_v~d" (var-idx v))
-   (string-append "_v" (number->string (var-idx v)))
-   ))
+   (string-append "_v" (number->string (var-idx v)))))
 
-(define reify-M
-  (lambda (vs S)
-    (if (null? vs)
-        S
-        (let ((S (reify-M (cdr vs) S))
-              (v (car vs)))
-          (if (eq? unbound (subst-map-lookup v S))
-              (subst-map-add S v (reify-v-name v))
-              S)))))
-
-(define walkr
-  (lambda (u S)
-    (if (var? u)
-      (let ((val (subst-map-lookup u S)))
-        (if (eq? val unbound)
-          u
-          (walkr val S)))
-      u)))
-(define walkr*
-  (lambda (v S)
-    (let ((v (walkr v S)))
-      (cond
-        ((var? v) v)
-        ((pair? v)
-         (cons (walkr* (car v) S) (walkr* (cdr v) S)))
-        (else v)))))
+; (Term) -> SExpr
+; replaces all miniKanren variables in a term with symbols like _v0 for the solver.
+(define (reify-to-smt-symbols v)
+  (cond
+    ((var? v) (reify-v-name v))
+    ((pair? v)
+     (cons (reify-to-smt-symbols (car v)) (reify-to-smt-symbols (cdr v))))
+    (else v)))
 
 (define z/reify-SM
   (lambda (M . args)
@@ -87,9 +64,7 @@
                (M (reverse M))
                (M (if no_walk? M (walk* M S)))
                (vs (vars M '()))
-               (S (reify-M vs m-subst-map))
-               (_ (set! m-subst-map S))
-               (M (walkr* M S))
+               (M (reify-to-smt-symbols M))
                (dd-M (partition declare-datatypes? M))
                (dd (car dd-M))
                (M (cdr dd-M))
@@ -119,20 +94,6 @@
   (replay-if-needed a m)
   (call-z3 `((check-sat-assuming ,(get-assumptions a))))
   (read-sat))
-
-(define (take-until p xs)
-  (if (null? xs)
-      '()
-      (if (p (car xs))
-          '()
-          (cons (car xs) (take-until p (cdr xs))))))
-
-(define (take-while p xs)
-  (if (null? xs)
-      '()
-      (if (p (car xs))
-          (cons (car xs) (take-while p (cdr xs)))
-          '())))
 
 (define (smt-ok? st x)
   (let ((x (walk* x (state-S st))))
