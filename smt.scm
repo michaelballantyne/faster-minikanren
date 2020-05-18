@@ -1,21 +1,21 @@
+(load "match.scm")
+
 (define partition
   (lambda (p xs)
     (cons (filter p xs)
           (filter (lambda (x) (not (p x))) xs))))
 
-(define declare-datatypes?
-  (lambda (s)
-    (and (pair? s)
-         (or (eq? 'declare-datatypes (car s))
-             (eq? 'declare-sort (car s)))
-         (cadr s))))
+(define (declare-datatypes? s)
+  (match s
+    [(declare-datatypes . ,_) #t]
+    [(declare-sort . ,_) #t]
+    [,_ #f]))
 
-(define declares?
-  (lambda (s)
-    (and (pair? s)
-         (or (eq? 'declare-fun (car s))
-             (eq? 'declare-const (car s)))
-         (cadr s))))
+(define (declares? s)
+  (match s
+    [(declare-fun . ,_) #t]
+    [(declare-const . ,_) #t]
+    [,_ #f]))
 
 (define filter-redundant-declare
   (lambda (d es)
