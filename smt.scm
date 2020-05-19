@@ -1,51 +1,100 @@
 (load "match.scm")
 
-(define partition
-  (lambda (p xs)
-    (cons (filter p xs)
-          (filter (lambda (x) (not (p x))) xs))))
 
-(define (declare-datatypes? s)
-  (match s
-    [(declare-datatypes . ,_) #t]
-    [(declare-sort . ,_) #t]
-    [,_ #f]))
+; For avoiding duplicate declares, need an (IntMap SMTType)
+; Processing an assert will add a declare to Int if there isn't
+;  already a declare.
+; Processing a declaration will add the declare if there isn't one
+;  or if it matches; if it doesn't match, we raise an error.
+;
+; In the version using check-sat-assuming, declarations will need
+;   to be globally consistent, not just per-path consistent.
+;   This is because we'll be keeping assertions from other paths
+;   as part of the SMT problem, though qualified by assumptions.
+; Thus, this map will need to be global, not part of the constraint
+;  store or recomputed per-check.
 
-(define (declares? s)
-  (match s
-    [(declare-fun . ,_) #t]
-    [(declare-const . ,_) #t]
-    [,_ #f]))
 
-(define filter-redundant-declare
-  (lambda (d es)
-    (filter
-     (lambda (e)
-       (or (not (eq? (cadr e) (cadr d)))
-           (if (equal? e d) #f
-               (error 'filter-redundant-declare "inconsistent" d e))))
-     es)))
+; There are two other kinds of deduplication:
+;  - Avoiding repeated identical assertions to simplify the problem, even when explicitly written by programmers.
+;  - In the check-sat-assuming version: only asserting new constraints, not those previously asserted by other threads.
+;
+; These could perhaps be combined. Given we're not providing the And / Or tree it is safe to equate constraints in
+; different positions.
+;
+; How would assigning assumption IDs work then?
+;   Could happen after deduplication? Maybe a hashmap from assertion text to assumption ID?
+;
+; This can be after the upper logical layer has detected inconsistencies, reified logic vars, walk*'ed, etc.
+;
+; Constraint store could contain constraints without assumption IDs. Each time we'd figure what's new
+;   and assign assumptions again.
+;
+; Ideally we would have a way of only look at new stuff or stuff that has to be replayed due to a GC.
+;  But it seems likely that this won't matter, as the SMT calls will be much more expensive.
+;
+; I think deduping declarations can happen in the same pass, though it will use a different map as it needs to
+; know a type rather than an assumption ID.
 
-(define filter-redundant-declares
-  (lambda (ds es)
-    (if (null? ds)
-        es
-        (filter-redundant-declares
-         (cdr ds)
-         (cons (car ds) (filter-redundant-declare (car ds) es))))))
+; Difference between naive and assumptions versions:
+;   naive resets every time before or after checking
+;   naive emits asserts without assumption guards
+;   naive does check-sat, not check-sat-assuming.
 
-(define decls '())
-(define undeclared?
-  (lambda (x)
-    (let ((r (not (memq x decls))))
-      (when r
-        (set! decls (cons x decls)))
-      r)))
+; What can we reuse of the old impl?
+;   z/varo
+;   probably z/purge
+;   reify-to-smt-symbols
+
+; z/check just takes in state-M, (re)plays
+;   in check-sat-assuming mode it accumulates the list of assumptions that assertions resolve to
+;   and uses that list in check-sat-assuming
+
+; Other things reify, add to state-M, then call z/check if ready.
+
+
+; (Parameter (or 'naive '(assumptions <max-assumptions>))
+(define mode (make-parameter 'naive))
+
+; SMTType = (or 'Int 'Real)
+; (IntMap SMTType)
+(define declared-types )
+
+
+; Assm = Symbol
+
+; (ListOf Assm)
+(define all-assumptions )
+
+; (AList ReifiedAssertion Assm)
+(define assertion-to-assumption )
+
+; Int x where 0 <= x < max-assumptions
+;   for GC and assumption naming
+(define assumption-count )
+
+
+; Front-end
+
+(define (z/assert e)
+  (z/ `(assert ,e)))
+
+
+(define (z/ stmt)
+
+  (match stmt
+    [(declare-const ,v ,t)
+     ]
+    [(assert ,e)
+     ])
+
+  (walk* )
+
+  )
 
 ; (Var) -> Symbol
 (define (reify-v-name v)
-  (string->symbol
-   (string-append "_v" (number->string (var-idx v)))))
+  (string->symbol (string-append "_v" (number->string (var-idx v)))))
 
 ; (Term) -> SExpr
 ; replaces all miniKanren variables in a term with symbols like _v0 for the solver.
@@ -56,40 +105,13 @@
      (cons (reify-to-smt-symbols (car v)) (reify-to-smt-symbols (cdr v))))
     (else v)))
 
-(define z/reify-SM
-  (lambda (M . args)
-    (let ((no_walk? (and (not (null? args)) (car args))))
-      (lambda (st)
-        (let* ((S (state-S st))
-               (M (reverse M))
-               (M (if no_walk? M (walk* M S)))
-               (vs (vars M '()))
-               (M (reify-to-smt-symbols M))
-               (dd-M (partition declare-datatypes? M))
-               (dd (car dd-M))
-               (M (cdr dd-M))
-               (ds-R (partition declares? M))
-               (ds (car ds-R))
-               (R (cdr ds-R))
-               (ds (filter-redundant-declares ds ds))
-               (_ (set! decls (append (map cadr ds) decls)))
-               (dc (map (lambda (x) `(declare-const ,x Int))
-                        (filter undeclared? (map reify-v-name vs)))))
-          (list
-           dd
-           (append
-            ds
-            dc
-            R)
-           vs))))))
+(define (pos-assms->all-literals pos)
+  (map (lambda (b)
+         (if (memq b pos)
+           b
+           `(not ,b)))
+       all-assumptions))
 
-(define (get-assumptions a)
-  (let ((pos (assq a assumption-chains)))
-    (map (lambda (b)
-           (if (memq b pos)
-               b
-               `(not ,b)))
-         (reverse all-assumptions))))
 (define (check-sat-assuming a m)
   (replay-if-needed a m)
   (call-z3 `((check-sat-assuming ,(get-assumptions a))))
@@ -158,6 +180,12 @@
         (call-z3 lines)
         (let ((M (append (reverse lines) (state-M st))))
           (state-with-M st M))))))
+
+; Ah. So replay is repeating some of the same work as reify-SM is, but on post-reified content:
+;    declare Int for undeclared vars in assms
+;    avoid replaying dup decls
+;    adding assumptions to all-assumptions as they are re-declared
+
 (define (replay-if-needed a m)
   (let ((r (filter (lambda (x) (not (member x local-buffer))) m)))
     (unless (null? r)
