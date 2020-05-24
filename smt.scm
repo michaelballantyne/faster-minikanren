@@ -5,8 +5,8 @@
   (newline))
 
 ; (Parameter (or 'naive '(assumptions <max-assumptions>))
-;(define mode (make-parameter 'naive))
-(define mode (make-parameter '(assumptions 1000)))
+(define mode (make-parameter 'naive))
+;(define mode (make-parameter '(assumptions 1000)))
 
 ; Front-end
 
@@ -26,7 +26,7 @@
            (error 'z/ "Expected logic variable in declare-const"))
          stmt]
         [(assert ,e)
-         `(assert ,(wrap-neg (walk* e (state-S st))))]
+         `(assert ,(walk* e (state-S st)))]
         [,other (error 'z/ "Only declare-const and assert are supported")])))
 
     ((z/internal reified) st)))
@@ -103,7 +103,10 @@
       (string-append "_a" (number->string assumption-count))))
   (set! assumption-count (+ assumption-count 1))
   (set! all-assumptions (cons assm all-assumptions))
-  (call-z3 `((declare-const ,assm Bool)))
+  (match (mode)
+    [(assumptions ,_)
+     (call-z3 `((declare-const ,assm Bool)))]
+    [,_ (void)])
   assm)
 
 (define (add-assertion-to-assumption! e assm)
@@ -127,7 +130,19 @@
        (z/check-sat-assuming assms))])
 
   (if (read-sat)
-    st
+    ; TODO: incorporate code like this to fix bug. Need `replay` to tell me what
+    ;  vars were added as well as what assumptions were involved.
+    ;((let loop ((vs (caddr r)))
+                    ;(lambdag@ (st)
+                      ;(if (null? vs)
+                          ;st
+                          ;(bind*
+                           ;st
+                           ;(numbero (car vs))
+                           ;(z/varo (car vs))
+                           ;(loop (cdr vs))))))
+                  ;st)
+                  st
     #f))
 
 (define (replay! all-statements)
@@ -171,6 +186,7 @@
     [(,_ . ,assm)
      assm]
     [#f
+     (define e^ (wrap-neg (reify-to-smt-symbols e)))
      (define assm (fresh-assumption!))
      (add-assertion-to-assumption! e assm)
      (for-each
@@ -180,9 +196,9 @@
        (vars e '()))
      (match (mode)
             [naive
-              (call-z3 `((assert ,(reify-to-smt-symbols e))))]
+              (call-z3 `((assert ,e^)))]
             [(assumptions ,_)
-             (call-z3 `((assert (=> ,assm ,(reify-to-smt-symbols e)))))])
+             (call-z3 `((assert (=> ,assm ,e^))))])
      assm]))
 
 (define (z/check-sat)
