@@ -1,96 +1,42 @@
 (load "match.scm")
 
-
-; For avoiding duplicate declares, need an (IntMap SMTType)
-; Processing an assert will add a declare to Int if there isn't
-;  already a declare.
-; Processing a declaration will add the declare if there isn't one
-;  or if it matches; if it doesn't match, we raise an error.
-;
-; In the version using check-sat-assuming, declarations will need
-;   to be globally consistent, not just per-path consistent.
-;   This is because we'll be keeping assertions from other paths
-;   as part of the SMT problem, though qualified by assumptions.
-; Thus, this map will need to be global, not part of the constraint
-;  store or recomputed per-check.
-
-
-; There are two other kinds of deduplication:
-;  - Avoiding repeated identical assertions to simplify the problem, even when explicitly written by programmers.
-;  - In the check-sat-assuming version: only asserting new constraints, not those previously asserted by other threads.
-;
-; These could perhaps be combined. Given we're not providing the And / Or tree it is safe to equate constraints in
-; different positions.
-;
-; How would assigning assumption IDs work then?
-;   Could happen after deduplication? Maybe a hashmap from assertion text to assumption ID?
-;
-; This can be after the upper logical layer has detected inconsistencies, reified logic vars, walk*'ed, etc.
-;
-; Constraint store could contain constraints without assumption IDs. Each time we'd figure what's new
-;   and assign assumptions again.
-;
-; Ideally we would have a way of only look at new stuff or stuff that has to be replayed due to a GC.
-;  But it seems likely that this won't matter, as the SMT calls will be much more expensive.
-;
-; I think deduping declarations can happen in the same pass, though it will use a different map as it needs to
-; know a type rather than an assumption ID.
-
-; Difference between naive and assumptions versions:
-;   naive resets every time before or after checking
-;   naive emits asserts without assumption guards
-;   naive does check-sat, not check-sat-assuming.
-
-; What can we reuse of the old impl?
-;   z/varo
-;   probably z/purge
-;   reify-to-smt-symbols
-
-; z/check just takes in state-M, (re)plays
-;   in check-sat-assuming mode it accumulates the list of assumptions that assertions resolve to
-;   and uses that list in check-sat-assuming
-
-; Other things reify, add to state-M, then call z/check if ready.
-
-
 ; (Parameter (or 'naive '(assumptions <max-assumptions>))
 (define mode (make-parameter 'naive))
-
-; SMTType = (or 'Int 'Real)
-; (IntMap SMTType)
-(define declared-types )
-
-
-; Assm = Symbol
-
-; (ListOf Assm)
-(define all-assumptions )
-
-; (AList ReifiedAssertion Assm)
-(define assertion-to-assumption )
-
-; Int x where 0 <= x < max-assumptions
-;   for GC and assumption naming
-(define assumption-count )
-
 
 ; Front-end
 
 (define (z/assert e)
   (z/ `(assert ,e)))
 
-
 (define (z/ stmt)
+  (lambda (st)
+    (define reified
+      (match stmt
+        [(declare-const ,v ,t)
+         (match t
+           [Int #t] [Real #t]
+           [,other (error 'z/ "Only Int and Real types are supported")])
+         (when (not (var? v))
+           (error 'z/ "Expected logic variable in declare-const"))
+         stmt]
+        [(assert ,e)
+         (wrap-neg (reify-to-smt-symbols (walk* e)))]
+        [,other (error 'z/ "Only declare-const and assert are supported")]))
 
-  (match stmt
-    [(declare-const ,v ,t)
-     ]
-    [(assert ,e)
-     ])
+    ((z/internal reified) st)))
 
-  (walk* )
+(define (z/internal stmt)
+  (lambda (st)
+    (check
+      (add-statement st reified))))
 
-  )
+; (state-M st) : (ListOf Stmts)  in reverse order.
+
+(define (state-add-statement st stmt)
+  (state-with-M st (cons st (state-M st))))
+
+(define (state-statements st)
+  (reverse (state-M st))
 
 ; (Var) -> Symbol
 (define (reify-v-name v)
@@ -105,6 +51,131 @@
      (cons (reify-to-smt-symbols (car v)) (reify-to-smt-symbols (cdr v))))
     (else v)))
 
+(define (wrap-neg e)
+  (if (number? e)
+      (if (< e 0)
+	  `(- ,(- e))
+	  e)
+      (if (pair? e)
+	  (cons (wrap-neg (car e)) (wrap-neg (cdr e)))
+	  e)))
+
+;; Back-end
+
+; State; initialized in `reset!`
+
+; Int for GC and assumption naming
+(define assumption-count #f)
+
+; Assm = Symbol
+; (ListOf Assm)
+(define all-assumptions #f)
+
+; SMTType = (or 'Int 'Real)
+; (SubstMap SMTType)
+(define declared-types #f)
+
+; (AList ReifiedAssertion Assm)
+(define assertion-to-assumption #f)
+
+
+(define (reset!)
+  (call-z3 '((reset)))
+  (set! assumption-count 0)
+  (set! all-assumptions '())
+  (set! declared-types empty-subst-map)
+  (set! assertion-to-assumption '()))
+
+(define (fresh-assumption!)
+  (set! assumption-count (+ assumption-count 1))
+  (define assm
+    (string->symbol
+      (string-append "_a" (number->string assumption-count))))
+  (set! all-assumptions (cons assm all-assumptions))
+  assm)
+
+(define (add-assertion-to-assumption! e assm)
+  (set! assertion-to-assumption
+    (cons (cons e assm) assertion-to-assumption)))
+
+
+(define (check st)
+  (define all-stmts (state-statements st))
+
+  (match (mode)
+    [naive
+      (reset!)
+      (replay! all-stmts)
+      (check-sat)]
+    [(assumptions ,max-assms)
+     (when (> assumption-count max-assumptions)
+       (printf "gc z3...\n")
+       (reset!))
+     (define assms (replay! all-stmts))
+     (check-sat-assuming assms)])
+
+  (if (read-sat)
+    st
+    #f))
+
+(define (replay! all-statements)
+  (define assms '())
+  (define (add-assm! assm)
+    (set! assms (cons assm assms)))
+
+  (for-each
+    (lambda (stmt)
+      (match stmt
+        [(declare-const ,v ,t)
+         (ensure-declared! v t)]
+        [(assert ,e)
+         (add-assm! (ensure-assert! e))]))
+    all-statements)
+
+  assms)
+
+(define (declared-type v)
+  (let ([t (subst-map-lookup v declared-types)])
+    (if (eq? t unbound)
+      #f
+      t)))
+
+(define (ensure-declared! v as-type)
+  (let ([existing-decl-type (declared-type v)])
+    (cond
+      [(not existing-decl-type)
+       (call-z3 `((declare-const ,v ,as-type)))]
+      [(eq? as-type existing-decl-type)
+       (void)]
+      [else (error 'z/ "Inconsistent SMT types")])))
+
+
+; (SMTExpr) -> Assm
+; Returns the assumption variable corresponding to the
+;  assertion.
+(define (ensure-assert! e)
+  (match (assoc e assertion-to-assumption)
+    [(,_ . ,assm)
+     assm]
+    [#f
+     (define assm (fresh-assumption!))
+     (add-assertion-to-assumption! e assm)
+     (when (not (declared-type v))
+       (ensure-declared! v 'Int))
+     (match (mode)
+            [naive
+              (call-z3 `((assert ,e)))]
+            [(assumptions ,_)
+             (call-z3 `((assert (=> ,assm ,e))))])
+     assm]))
+
+(define (check-sat)
+  (call-z3 '((check-sat))))
+
+(define (check-sat-assuming a)
+  (call-z3 `((check-sat-assuming
+               ,(pos-assms->all-literals a)))))
+
 (define (pos-assms->all-literals pos)
   (map (lambda (b)
          (if (memq b pos)
@@ -112,10 +183,6 @@
            `(not ,b)))
        all-assumptions))
 
-(define (check-sat-assuming a m)
-  (replay-if-needed a m)
-  (call-z3 `((check-sat-assuming ,(get-assumptions a))))
-  (read-sat))
 
 (define (smt-ok? st x)
   (let ((x (walk* x (state-S st))))
@@ -135,17 +202,17 @@
 (define (add-smt-disequality st D)
   (let ((as (filter-smt-ok? st D)))
     (if (not (null? as))
-        (z/assert
-         `(and
-           ,@(map
-              (lambda (cs)
-                `(or
-                  ,@(map
-                     (lambda (ds)
-                       `(not (= ,(car ds) ,(cdr ds))))
-                     cs)))
-              as))
-         #t)
+        (z/internal
+         `(assert
+            (and
+              ,@(map
+                  (lambda (cs)
+                    `(or
+                       ,@(map
+                           (lambda (ds)
+                             `(not (= ,(car ds) ,(cdr ds))))
+                           cs)))
+                  as))))
         (lambdag@ (st) st))))
 
 (define z/varo
@@ -166,147 +233,6 @@
                    (lambdag@ (st) ((add-smt-disequality st D) st)))))
             st)))))
 
-(define global-buffer '())
-(define z/global
-  (lambda (lines)
-    (call-z3 lines)
-    (set! global-buffer (append global-buffer lines))))
-(define local-buffer '())
-(define z/local
-  (lambda (lines)
-    (lambdag@ (st)
-      (begin
-        (set! local-buffer (append local-buffer lines))
-        (call-z3 lines)
-        (let ((M (append (reverse lines) (state-M st))))
-          (state-with-M st M))))))
-
-; Ah. So replay is repeating some of the same work as reify-SM is, but on post-reified content:
-;    declare Int for undeclared vars in assms
-;    avoid replaying dup decls
-;    adding assumptions to all-assumptions as they are re-declared
-
-(define (replay-if-needed a m)
-  (let ((r (filter (lambda (x) (not (member x local-buffer))) m)))
-    (unless (null? r)
-      (let ((lines (reverse r)))
-        (let ((new-decls  (filter (lambda (x)
-                                    (and (declares? x)
-                                         (not (eq? (caddr x) 'Bool))))
-                                  lines))
-              (new-assumptions (filter (lambda (x)
-                                         (and (declares? x)
-                                              (eq? (caddr x) 'Bool)))
-                                       lines))
-              (other-lines (filter (lambda (x) (not (declares? x))) lines)))
-          (let* ((undeclared-decls (filter (lambda (x) (undeclared? (cadr x))) new-decls))
-                 (undeclared-assumptions (filter (lambda (x) (undeclared? (cadr x))) new-assumptions))
-                 (actual-lines (append undeclared-decls undeclared-assumptions other-lines)))
-            (let* ((rs (filter undeclared? (map reify-v-name (cdr (assq a relevant-vars)))))
-                   (undeclared-rs (map (lambda (x) `(declare-const ,x Int)) rs))
-                   (actual-lines (append undeclared-rs actual-lines)))
-              (set! all-assumptions (append (map cadr undeclared-assumptions) all-assumptions))
-              (set! local-buffer (append local-buffer actual-lines))
-              (call-z3 actual-lines))))))))
-
-(define (z/check m a no_walk?)
-  (lambdag@ (st)
-    (begin
-      (replay-if-needed (last-assumption (state-M st)) (state-M st))
-      (let ((r (wrap-neg ((z/reify-SM m no_walk?) st))))
-        (z/global (car r))
-        (bind*
-         st
-         (z/local (cadr r))
-         (lambdag@ (st)
-           (if (and a (check-sat-assuming a (state-M st)))
-               (begin
-                 (let ((p (assq a relevant-vars)))
-                   ;;(set-cdr! p (append (caddr r) (cdr p)))
-                   (set! relevant-vars (cons (cons a (append (caddr r) (cdr p))) (remove p relevant-vars))))
-                 ((let loop ((vs (caddr r)))
-                    (lambdag@ (st)
-                      (if (null? vs)
-                          st
-                          (bind*
-                           st
-                           (numbero (car vs))
-                           (z/varo (car vs))
-                           (loop (cdr vs))))))
-                  st))
-               (if a #f st))))))))
-
-(define (z/ line)
-  (z/check (list line) #f #t))
-
-(define assumption-count 0)
-(define (fresh-assumption)
-  (when (and (= (remainder assumption-count 1000) 0)
-             (> assumption-count 0))
-    (printf "gc z3...\n")
-    (z/gc!))
-  (set! assumption-count (+ assumption-count 1))
-  (string->symbol ;(format #f "_a~d" assumption-count)
-   (string-append "_a" (number->string assumption-count))
-                  ))
-
-(define (last-assumption m)
-  (let ((r (filter (lambda (x) (and (pair? x)
-                               (eq? 'assert (car x))
-                               (pair? (cadr x))
-                               (eq? (car (cadr x)) '=>)))
-                   m)))
-    (if (null? r)
-        'true
-        (cadr (cadr (car r))))))
-
-(define (wrap-neg e)
-  (if (number? e)
-      (if (< e 0)
-	  `(- ,(- e))
-	  e)
-      (if (pair? e)
-	  (cons (wrap-neg (car e)) (wrap-neg (cdr e)))
-	  e)))
-
-(define z/assert
-  (lambda (e . args)
-    (let ((no_walk? (and (not (null? args)) (car args))))
-      (lambdag@ (st)
-        (let ((a1 (fresh-assumption)))
-          (let ((a0 (last-assumption (state-M st))))
-            (let ((rs (if (eq? a0 'true) '()  (cdr (assq a0 relevant-vars))))
-                  (as (if (eq? a0 'true) '() (assq a0 assumption-chains))))
-              (set! relevant-vars (cons (cons a1 rs) relevant-vars))
-              (set! assumption-chains (cons (cons a1 as) assumption-chains))
-              (set! all-assumptions (cons a1 all-assumptions))
-              (bind*
-               st
-               (z/check `((assert (=> ,a1 ,e))
-                          (declare-const ,a1 Bool))
-                        a1
-                        no_walk?)))))))))
-
-(define relevant-vars '())
-(define assumption-chains '())
-(define all-assumptions '())
-(define (z/reset!)
-  (call-z3 '((reset)))
-  (set! decls '())
-  (set! relevant-vars '())
-  (set! assumption-chains '())
-  (set! all-assumptions '())
-  (set! assumption-count 0)
-  (set! m-subst-map empty-subst-map)
-  (set! global-buffer '())
-  (set! local-buffer '()))
-(define (z/gc!)
-  (call-z3 '((reset)))
-  (call-z3 global-buffer)
-  (set! decls '())
-  (set! all-assumptions '())
-  (set! local-buffer '()))
-
 (define add-model
   (lambda (m)
     (lambdag@ (st)
@@ -326,30 +252,26 @@
                           )) m)])
       (if (null? m)
           fail
-          (z/assert (cadr (neg-model m)))))))
+          (z/internal `(assert ,(cadr (neg-model m))))))))
 
 (define z/purge
   (lambdag@ (st)
     (let ((M (state-M st)))
       (if (null? M)
           st
-          (let ([a (last-assumption (state-M st))])
-            (if (eq? a 'true)
-                st
-                (if (not (check-sat-assuming a (state-M st)))
-                    #f
-                    (let ([rs (map (lambda (x) (cons (reify-v-name x) x)) (cdr (assq a relevant-vars)))])
-                      ((let loop ()
-                         (lambdag@ (st)
-                           (let ((m (get-model-inc)))
-                             (let ((m (map (lambda (x) (cons (cdr (assq (car x) rs)) (cdr x))) (filter (lambda (x) (assq (car x) rs)) m))))
-                               (let ((st (state-with-scope st (new-scope))))
-                                 (mplus*
-                                  (bind*
-                                   (state-with-M st '())
-                                   (add-model m))
-                                  (bind*
-                                   st
-                                   (assert-neg-model m)
-                                   (loop))))))))
-                       st)))))))))
+          (if (not (check st))
+              #f
+              (let ([rs (map (lambda (x) (cons (reify-v-name x) x)) (cdr (assq a relevant-vars)))])
+                ((let loop ()
+                   (lambdag@ (st)
+                     (let ((m (get-model-inc)))
+                       (let ((st (state-with-scope st (new-scope))))
+                         (mplus*
+                           (bind*
+                             (state-with-M st '())
+                             (add-model m))
+                           (bind*
+                             st
+                             (assert-neg-model m)
+                             (loop))))))))
+                 st))))))
