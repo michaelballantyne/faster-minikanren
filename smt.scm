@@ -1,7 +1,12 @@
 (load "match.scm")
 
+(define (displayln thing)
+  (display thing)
+  (newline))
+
 ; (Parameter (or 'naive '(assumptions <max-assumptions>))
-(define mode (make-parameter 'naive))
+;(define mode (make-parameter 'naive))
+(define mode (make-parameter '(assumptions 1000)))
 
 ; Front-end
 
@@ -11,6 +16,7 @@
 (define (z/ stmt)
   (lambda (st)
     (define reified
+      (begin
       (match stmt
         [(declare-const ,v ,t)
          (match t
@@ -20,23 +26,23 @@
            (error 'z/ "Expected logic variable in declare-const"))
          stmt]
         [(assert ,e)
-         (wrap-neg (reify-to-smt-symbols (walk* e)))]
-        [,other (error 'z/ "Only declare-const and assert are supported")]))
+         `(assert ,(wrap-neg (walk* e (state-S st))))]
+        [,other (error 'z/ "Only declare-const and assert are supported")])))
 
     ((z/internal reified) st)))
 
 (define (z/internal stmt)
   (lambda (st)
     (check
-      (add-statement st reified))))
+      (state-add-statement st stmt))))
 
 ; (state-M st) : (ListOf Stmts)  in reverse order.
 
 (define (state-add-statement st stmt)
-  (state-with-M st (cons st (state-M st))))
+  (state-with-M st (cons stmt (state-M st))))
 
 (define (state-statements st)
-  (reverse (state-M st))
+  (reverse (state-M st)))
 
 ; (Var) -> Symbol
 (define (reify-v-name v)
@@ -46,7 +52,9 @@
 ; replaces all miniKanren variables in a term with symbols like _v0 for the solver.
 (define (reify-to-smt-symbols v)
   (cond
-    ((var? v) (reify-v-name v))
+    ((var? v)
+     (set! smtvar-to-mkvar (cons (cons (reify-v-name v) v) smtvar-to-mkvar))
+     (reify-v-name v))
     ((pair? v)
      (cons (reify-to-smt-symbols (car v)) (reify-to-smt-symbols (cdr v))))
     (else v)))
@@ -62,7 +70,7 @@
 
 ;; Back-end
 
-; State; initialized in `reset!`
+; State; initialized in `z/reset!`
 
 ; Int for GC and assumption naming
 (define assumption-count #f)
@@ -78,20 +86,24 @@
 ; (AList ReifiedAssertion Assm)
 (define assertion-to-assumption #f)
 
+(define smtvar-to-mkvar #f)
 
-(define (reset!)
+
+(define (z/reset!)
   (call-z3 '((reset)))
   (set! assumption-count 0)
   (set! all-assumptions '())
   (set! declared-types empty-subst-map)
-  (set! assertion-to-assumption '()))
+  (set! assertion-to-assumption '())
+  (set! smtvar-to-mkvar '()))
 
 (define (fresh-assumption!)
-  (set! assumption-count (+ assumption-count 1))
   (define assm
     (string->symbol
       (string-append "_a" (number->string assumption-count))))
+  (set! assumption-count (+ assumption-count 1))
   (set! all-assumptions (cons assm all-assumptions))
+  (call-z3 `((declare-const ,assm Bool)))
   assm)
 
 (define (add-assertion-to-assumption! e assm)
@@ -104,15 +116,15 @@
 
   (match (mode)
     [naive
-      (reset!)
+      (z/reset!)
       (replay! all-stmts)
-      (check-sat)]
+      (z/check-sat)]
     [(assumptions ,max-assms)
-     (when (> assumption-count max-assumptions)
+     (when (> assumption-count max-assms)
        (printf "gc z3...\n")
-       (reset!))
-     (define assms (replay! all-stmts))
-     (check-sat-assuming assms)])
+       (z/reset!))
+     (let ([assms (replay! all-stmts)])
+       (z/check-sat-assuming assms))])
 
   (if (read-sat)
     st
@@ -144,7 +156,8 @@
   (let ([existing-decl-type (declared-type v)])
     (cond
       [(not existing-decl-type)
-       (call-z3 `((declare-const ,v ,as-type)))]
+       (set! declared-types (subst-map-add declared-types v as-type))
+       (call-z3 `((declare-const ,(reify-to-smt-symbols v) ,as-type)))]
       [(eq? as-type existing-decl-type)
        (void)]
       [else (error 'z/ "Inconsistent SMT types")])))
@@ -160,19 +173,22 @@
     [#f
      (define assm (fresh-assumption!))
      (add-assertion-to-assumption! e assm)
-     (when (not (declared-type v))
-       (ensure-declared! v 'Int))
+     (for-each
+       (lambda (v)
+         (when (not (declared-type v))
+           (ensure-declared! v 'Int)))
+       (vars e '()))
      (match (mode)
             [naive
-              (call-z3 `((assert ,e)))]
+              (call-z3 `((assert ,(reify-to-smt-symbols e))))]
             [(assumptions ,_)
-             (call-z3 `((assert (=> ,assm ,e))))])
+             (call-z3 `((assert (=> ,assm ,(reify-to-smt-symbols e)))))])
      assm]))
 
-(define (check-sat)
+(define (z/check-sat)
   (call-z3 '((check-sat))))
 
-(define (check-sat-assuming a)
+(define (z/check-sat-assuming a)
   (call-z3 `((check-sat-assuming
                ,(pos-assms->all-literals a)))))
 
@@ -236,12 +252,16 @@
 (define add-model
   (lambda (m)
     (lambdag@ (st)
-      (if (null? m)
-          st
+      (cond
+        [(null? m) st]
+        [(assoc (caar m) smtvar-to-mkvar)
+         => (lambda (p)
           (bind*
            st
-           (== (caar m) (cdar m))
-           (add-model (cdr m)))))))
+           (== (cdr p) (cdar m))
+           (add-model (cdr m))))]
+        [else ((add-model (cdr m)) st)]
+         ))))
 
 (define assert-neg-model
   (lambda (m)
@@ -261,17 +281,16 @@
           st
           (if (not (check st))
               #f
-              (let ([rs (map (lambda (x) (cons (reify-v-name x) x)) (cdr (assq a relevant-vars)))])
-                ((let loop ()
-                   (lambdag@ (st)
-                     (let ((m (get-model-inc)))
-                       (let ((st (state-with-scope st (new-scope))))
-                         (mplus*
-                           (bind*
-                             (state-with-M st '())
-                             (add-model m))
-                           (bind*
-                             st
-                             (assert-neg-model m)
-                             (loop))))))))
-                 st))))))
+              ((let loop ()
+                 (lambdag@ (st)
+                           (let ((m (get-model-inc)))
+                             (let ((st (state-with-scope st (new-scope))))
+                               (mplus*
+                                 (bind*
+                                   (state-with-M st '())
+                                   (add-model m))
+                                 (bind*
+                                   st
+                                   (assert-neg-model m)
+                                   (loop)))))))
+              st))))))
