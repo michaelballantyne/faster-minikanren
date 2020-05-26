@@ -15,21 +15,19 @@
 
 (define (z/ stmt)
   (lambda (st)
-    (define reified
-      (begin
-      (match stmt
-        [(declare-const ,v ,t)
-         (match t
-           [Int #t] [Real #t]
-           [,other (error 'z/ "Only Int and Real types are supported")])
-         (when (not (var? v))
-           (error 'z/ "Expected logic variable in declare-const"))
-         stmt]
-        [(assert ,e)
-         `(assert ,(walk* e (state-S st)))]
-        [,other (error 'z/ "Only declare-const and assert are supported")])))
-
-    ((z/internal reified) st)))
+    (match stmt
+      [(declare-const ,v ,t)
+       (match t
+         [Int #t] [Real #t]
+	 [,other (error 'z/ "Only Int and Real types are supported")])
+       (when (not (var? v))
+	 (error 'z/ "Expected logic variable in declare-const"))
+       ((z/internal stmt) st)]
+      [(assert ,e)
+       (let* ((e^ (walk* e (state-S st)))
+	      (st^ (add-varos e^ st)))
+	 ((z/internal `(assert ,e^)) st^))]
+      [,other (error 'z/ "Only declare-const and assert are supported")])))
 
 (define (z/internal stmt)
   (lambda (st)
@@ -264,6 +262,16 @@
                    (lambdag@ (st) st)
                    (lambdag@ (st) ((add-smt-disequality st D) st)))))
             st)))))
+
+(define (add-varos e st)
+  (let loop ((vs (vars e '()))
+	     (st st))
+    (if (null? vs)
+	st
+	(bind*
+	 st
+	 (z/varo (car vs))
+	 (lambda (st) (loop (cdr vs) st))))))
 
 (define add-model
   (lambda (m)

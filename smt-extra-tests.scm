@@ -15,6 +15,14 @@
       (z/assert `(= ,a (+ ,b ,b)))))
   '((4 2) (2 1)))
 
+(test "unif-0"
+  (run 1 (q)
+    (fresh (x y)
+      (== x y)
+      (z/assert `(= ,x 1))
+      (== y 2)))
+  '())
+
 (test "unif"
   (run 2 (q)
     (fresh (a b)
