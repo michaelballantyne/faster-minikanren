@@ -36,7 +36,7 @@
     [(declare-const ,v ,t)
      (match t
        [Int #t] [Real #t]
-       [,other (error 'z/ "Only Int and Real types are supported")])
+       [,other (error 'z/ "Only Int and Real types are supported" t)])
      (when (not (var? v))
        (error 'z/ "Expected logic variable in declare-const"))
      (lambdag@ (st)
@@ -264,11 +264,22 @@
        (call-z3 `((assert (=> ,assm ,e^))))])))
 
 ; (State) -> (or #f State)
-(define (z/check st)
+(define (z/check st . optional)
   (maybe-reset!)
   (let ((assms (replay! (state-statements st))))
     (do-check-sat assms)
-    (and (read-sat) st)))
+    (match (read-sat)
+      [sat st]
+      [unsat #f]
+      [unknown
+       (match (mode)
+         [(assumptions ,_) (guard (null? optional))
+          (displayln "got unknown; retrying after reset")
+          (z/reset!)
+          (z/check st #t)]
+         [,_
+          (displayln "got unknown; unsoundly failing branch")
+          #f])])))
 
 ; () -> Void
 (define (maybe-reset!)
