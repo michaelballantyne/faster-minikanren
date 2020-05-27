@@ -280,28 +280,42 @@
             st)))))
 
 (define (add-varos e st)
-  (let loop ((vs (vars e '()))
-	     (st st))
-    (if (null? vs)
-	st
-	(bind*
-	 st
-	 (z/varo (car vs))
-	 (lambda (st) (loop (cdr vs) st))))))
+  (foldl (lambda (v st)
+           (bind
+             st
+             (z/varo v)))
+          st
+          (vars e '())))
+
+(define z/purge
+  (lambdag@ (st)
+    (let ((M (state-M st)))
+      (if (null? M)
+          st
+          (let loop-g ([st^ st])
+            (let ([m (check/relevant-model st^)])
+              (if (not m)
+                (mzero)
+                ((conde
+                   [(add-model m)]
+                   [(assert-neg-model m)
+                    loop-g])
+                 st^))))))))
 
 ; Model = (Alist Var Number)
-; (Model) -> State
-(define add-model
-  (lambda (m)
-    (lambdag@ (st)
-      (foldl (lambda (p st)
-               (let-values (((S _) (unify (car p) (cdr p) (state-S st))))
-                 (when (not S)
-                   (error 'add-model "model fails mK constraints; mk constraints not soundly reflected to SMT"))
-                 (state-S-set st S)))
-             st
-             m))))
+; (State) -> (or #f Model)
+; EFFECT:
+;   solver state
+;   relevant-smtvar-to-mkvar
+(define (check/relevant-model st)
+  (and (check st) (get-relevant-model)))
 
+; EFFECT
+(define (get-relevant-model)
+  (filter (lambda (p) (var? (car p)))
+          (smt-symbols-to-vars (get-model-inc))))
+
+; EFFECT
 (define (smt-symbols-to-vars e)
   (sexp-map
     (lambda (sexp)
@@ -312,32 +326,27 @@
         [else sexp]))
     e))
 
+; (Model) -> State
+; Pure
+(define add-model
+  (lambda (m)
+    (lambdag@ (st)
+      (foldl (lambda (p st)
+               (let-values (((S _) (unify (lhs p) (rhs p) (state-S st))))
+                 (when (not S)
+                   (error 'add-model "model fails mK constraints; mk constraints not soundly reflected to SMT"))
+                 (state-S-set st S)))
+             st
+             m))))
+
+; (Model) -> Goal
+; Pure
 (define (assert-neg-model m)
   (if (null? m)
     fail
-    (z/internal (neg-model m))))
+    (lambda (st) (state-add-statement st (neg-model m)))))
 
-(define (get-relevant-model)
-  (filter (lambda (p) (var? (car p)))
-          (smt-symbols-to-vars (get-model-inc))))
 
-(define z/purge
-  (lambdag@ (st)
-    (let ((M (state-M st)))
-      (if (null? M)
-          st
-          (if (not (check st))
-              #f
-              ((let loop ()
-                 (lambdag@ (st)
-                           (let ((m (get-relevant-model)))
-                             (let ((st (state-with-scope st (new-scope))))
-                               (choice
-                                 (let ((st^ (state-M-set st '())))
-                                   ((add-model m) st^))
-                                 (let ([neg-model-g (assert-neg-model m)])
-                                   (lambda ()
-                                     (let ((st^ (neg-model-g st)))
-                                       (and st^
-                                            ((loop) st^))))))))))
-              st))))))
+
+
+
