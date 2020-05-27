@@ -51,7 +51,6 @@
 (define (reify-to-smt-symbols v)
   (cond
     ((var? v)
-     (set! smtvar-to-mkvar (cons (cons (reify-v-name v) v) smtvar-to-mkvar))
      (reify-v-name v))
     ((pair? v)
      (cons (reify-to-smt-symbols (car v)) (reify-to-smt-symbols (cdr v))))
@@ -84,7 +83,7 @@
 ; (AList ReifiedAssertion Assm)
 (define assertion-to-assumption #f)
 
-(define smtvar-to-mkvar #f)
+(define relevant-smtvar-to-mkvar #f)
 
 
 (define (z/reset!)
@@ -93,7 +92,7 @@
   (set! all-assumptions '())
   (set! declared-types empty-subst-map)
   (set! assertion-to-assumption '())
-  (set! smtvar-to-mkvar '()))
+  (set! relevant-smtvar-to-mkvar '()))
 
 (define (fresh-assumption!)
   (define assm
@@ -115,6 +114,8 @@
 (define (check st)
   (define all-stmts (state-statements st))
 
+  (set! relevant-smtvar-to-mkvar '())
+
   (match (mode)
     [naive
       (z/reset!)
@@ -128,19 +129,7 @@
        (z/check-sat-assuming assms))])
 
   (if (read-sat)
-    ; TODO: incorporate code like this to fix bug. Need `replay` to tell me what
-    ;  vars were added as well as what assumptions were involved.
-    ;((let loop ((vs (caddr r)))
-                    ;(lambdag@ (st)
-                      ;(if (null? vs)
-                          ;st
-                          ;(bind*
-                           ;st
-                           ;(numbero (car vs))
-                           ;(z/varo (car vs))
-                           ;(loop (cdr vs))))))
-                  ;st)
-                  st
+    st
     #f))
 
 (define (replay! all-statements)
@@ -180,6 +169,12 @@
 ; Returns the assumption variable corresponding to the
 ;  assertion.
 (define (ensure-assert! e)
+  (for-each
+    (lambda (v)
+    (let ([smt-var (reify-v-name v)])
+           (when (not (assoc smt-var relevant-smtvar-to-mkvar))
+             (set! relevant-smtvar-to-mkvar (cons (cons smt-var v) relevant-smtvar-to-mkvar)))))
+    (vars e '()))
   (match (assoc e assertion-to-assumption)
     [(,_ . ,assm)
      assm]
@@ -211,7 +206,8 @@
          (if (memq b pos)
            b
            `(not ,b)))
-       all-assumptions))
+       all-assumptions)
+  )
 
 
 (define (smt-ok? st x)
@@ -278,7 +274,7 @@
     (lambdag@ (st)
       (cond
         [(null? m) st]
-        [(assoc (caar m) smtvar-to-mkvar)
+        [(assoc (caar m) relevant-smtvar-to-mkvar)
          => (lambda (p)
           (let-values (((S _) (unify (cdr p) (cdar m) (state-S st))))
             (let ((st^ (state S (state-C st) (state-M st))))
@@ -289,7 +285,7 @@
 (define (smt-symbols-to-vars v)
   (cond
     ((symbol? v)
-     (let ([r (assoc v smtvar-to-mkvar)])
+     (let ([r (assoc v relevant-smtvar-to-mkvar)])
        (if r
          (cdr r)
          v)))
@@ -302,9 +298,8 @@
   (lambda (m)
     (let* ([m
             (filter (lambda (x) ; ignoring functions
-                      (or (number? (cdr x))
-                          (symbol? (cdr x)) ; for bitvectors
-                          )) m)])
+                      (assoc (car x) relevant-smtvar-to-mkvar))
+                    m)])
       (if (null? m)
           fail
           (z/internal `(assert ,(smt-symbols-to-vars (cadr (neg-model m)))))))))
@@ -323,8 +318,9 @@
                                (choice
                                  (let ((st^ (state-with-M st '())))
                                    ((add-model m) st^))
-                                 (lambda ()
-                                   (let ((st^ ((assert-neg-model m) st)))
-                                     (and st^
-                                      ((loop) st^)))))))))
+                                 (let ([neg-model-g (assert-neg-model m)])
+                                   (lambda ()
+                                     (let ((st^ (neg-model-g st)))
+                                       (and st^
+                                            ((loop) st^))))))))))
               st))))))
