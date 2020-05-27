@@ -248,7 +248,7 @@
 (define (add-smt-disequality st D)
   (let ((as (filter-smt-ok? st D)))
     (if (not (null? as))
-        (z/internal
+        ((z/internal
          `(assert
             (and
               ,@(map
@@ -259,25 +259,22 @@
                              `(not (= ,(car ds) ,(cdr ds))))
                            cs)))
                   as))))
-        (lambdag@ (st) st))))
+          st)
+        st)))
 
-(define z/varo
-  (lambda (u)
-    (lambdag@ (st)
-      (let ((term (walk u (state-S st))))
-        (if (var? term)
-            (let* ((c (lookup-c term st))
-                   (M (c-M c))
-                   (D (c-D c)))
-              (bind*
-               st
-               (lambdag@ (st)
-                 (if M st
-                     (set-c term (c-with-M c #t) st)))
-               (if (or M (null? D))
-                   (lambdag@ (st) st)
-                   (lambdag@ (st) ((add-smt-disequality st D) st)))))
-            st)))))
+(define (z/varo u)
+  (lambdag@ (st)
+    (let ((term (walk u (state-S st))))
+      (if (var? term)
+          (let* ((c (lookup-c term st))
+                 (M (c-M c))
+                 (D (c-D c)))
+            (if M
+              st
+              (add-smt-disequality
+                (set-c term (c-with-M c #t) st)
+                D)))
+          st))))
 
 (define (add-varos e st)
   (foldl (lambda (v st)

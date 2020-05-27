@@ -461,10 +461,9 @@
   (and st
   (let* ((c (lookup-c v st))
          (D^ (cons d (c-D c)))
-         (c^ (c-with-D c D^)))
-    (bind*
-     (set-c v c^ st)
-     (add-smt-disequality st D^)))))
+         (c^ (c-with-D c D^))
+         (st^ (set-c v c^ st)))
+     (add-smt-disequality st^ D^))))
 
 (define =/=*
   (lambda (S+)
