@@ -21,10 +21,10 @@
 ; Maintains the invariant that miniKanren constraints relevant to SMT variables
 ; are reflected as solver constraints. Owns c-M.
 ;
-; All interaction with back-end happens via z/internal. Does not directly
+; All interaction with back-end happens via the back-end interface. Does not directly
 ; access solver or back-end state.
 ;
-; interface: z/assert, z/, z/add-equality, z/add-disequality
+; interface: z/assert, z/, z/add-equality, z/add-disequality, z/purge
 
 ; (SMTExpr) -> Goal
 (define (z/assert e)
@@ -116,18 +116,58 @@
              (let ((c (lookup-c x st)))
                (c-M c))))))
 
+; Goal
+(define z/purge
+  (lambdag@ (st)
+    (if (null? (state-M st))
+      st
+      (let loop-g ([st^ st])
+        (let ([m (z/check/relevant-model st^)])
+          (if (not m)
+            (mzero)
+            ((conde
+               [(add-model m)]
+               [(assert-neg-model m)
+                loop-g])
+             st^)))))))
+
+; (Model) -> Goal
+; Pure
+(define add-model
+  (lambda (m)
+    (lambdag@ (st)
+      (foldl (lambda (p st)
+               (let-values (((S _) (unify (lhs p) (rhs p) (state-S st))))
+                 (when (not S)
+                   (error 'add-model "model fails mK constraints; mk constraints not soundly reflected to SMT"))
+                 (state-S-set st S)))
+             st
+             m))))
+
+; (Model) -> Goal
+; Pure
+(define (assert-neg-model m)
+  (if (null? m)
+    fail
+    (z/internal/no-check (neg-model m))))
+
 
 ; Back-end
 ;
 ; Owns state-M.
 ;
-; interface: z/internal, z/reset, z/purge
+; interface: z/internal, z/internal/no-check, z/check, z/check/relevant-model, z/reset!
 
 ; ((ListOf Stmt)) -> Goal
 (define (z/internal stmt)
   (lambda (st)
-    (check
+    (z/check
       (state-add-statement st stmt))))
+
+; ((ListOf Stmt)) -> Goal
+(define (z/internal/no-check stmt)
+  (lambda (st)
+    (state-add-statement st stmt)))
 
 ; (state-M st) : (ListOf Stmt)  in reverse order.
 
@@ -219,7 +259,7 @@
        (call-z3 `((assert (=> ,assm ,e^))))])))
 
 ; (State) -> (or #f State)
-(define (check st)
+(define (z/check st)
   (maybe-reset!)
   (let ((assms (replay! (state-statements st))))
     (do-check-sat assms)
@@ -242,6 +282,16 @@
     [(assumptions ,_)
      (call-z3 `((check-sat-assuming
                ,(pos-assms->all-literals assms))))]))
+
+; ((ListOf Assm)) -> (ListOf SMTExpr)
+; In my testing with z3, this doesn't appear to help vs just asserting the positives
+(define (pos-assms->all-literals pos)
+  (map (lambda (b)
+         (if (memq b pos)
+           b
+           `(not ,b)))
+       all-assumptions))
+
 
 ; ((ListOf Stmt)) -> (ListOf Assm)
 (define (replay! all-statements)
@@ -294,34 +344,12 @@
        (do-assert! assm e)
        assm)]))
 
-; ((ListOf Assm)) -> (ListOf SMTExpr)
-; In my testing with z3, this doesn't appear to help vs just asserting the positives
-(define (pos-assms->all-literals pos)
-  (map (lambda (b)
-         (if (memq b pos)
-           b
-           `(not ,b)))
-       all-assumptions))
 
-; Goal
-(define z/purge
-  (lambdag@ (st)
-    (if (null? (state-M st))
-      st
-      (let loop-g ([st^ st])
-        (let ([m (check/relevant-model st^)])
-          (if (not m)
-            (mzero)
-            ((conde
-               [(add-model m)]
-               [(assert-neg-model m)
-                loop-g])
-             st^)))))))
 
 ; Model = (Alist Var Number)
 ; (State) -> (or #f Model)
-(define (check/relevant-model st)
-  (and (check st)
+(define (z/check/relevant-model st)
+  (and (z/check st)
        (get-relevant-model st)))
 
 ; ((ListOf MkVar)) -> Model
@@ -362,24 +390,4 @@
          => (lambda (p) (cdr p))]
         [else sexp]))
     e))
-
-; (Model) -> Goal
-; Pure
-(define add-model
-  (lambda (m)
-    (lambdag@ (st)
-      (foldl (lambda (p st)
-               (let-values (((S _) (unify (lhs p) (rhs p) (state-S st))))
-                 (when (not S)
-                   (error 'add-model "model fails mK constraints; mk constraints not soundly reflected to SMT"))
-                 (state-S-set st S)))
-             st
-             m))))
-
-; (Model) -> Goal
-; Pure
-(define (assert-neg-model m)
-  (if (null? m)
-    fail
-    (lambda (st) (state-add-statement st (neg-model m)))))
 
