@@ -463,7 +463,7 @@
          (D^ (cons d (c-D c)))
          (c^ (c-with-D c D^))
          (st^ (set-c v c^ st)))
-     (add-smt-disequality st^ D^))))
+     (z/add-disequality st^ D^))))
 
 (define =/=*
   (lambda (S+)
@@ -548,10 +548,7 @@
                 (list (numbero (rhs a)))
                 '())
             (if (c-M old-c)
-                (list (z/internal
-                        `(assert (= ,(lhs a) ,(rhs a))))
-                      (z/varo (rhs a))
-                         )
+                (list (z/add-equality (lhs a) (rhs a)))
                 '())
             (map (lambda (atom) (absento atom (rhs a))) (c-A old-c))
             (map (lambda (d) (=/=* d)) (c-D old-c)))))))))

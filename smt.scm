@@ -17,6 +17,14 @@
     (else (f sexp))))
 
 ; Front-end
+;
+; Maintains the invariant that miniKanren constraints relevant to SMT variables
+; are reflected as solver constraints. Owns c-M.
+;
+; All interaction with back-end happens via z/internal. Does not directly
+; access solver or back-end state.
+;
+; interface: z/assert, z/, z/add-equality, z/add-disequality
 
 ; (SMTExpr) -> Goal
 (define (z/assert e)
@@ -59,13 +67,20 @@
                  (D (c-D c)))
             (if M
               st
-              (add-smt-disequality
+              (z/add-disequality
                 (set-c term (c-with-M c #t) st)
                 D)))
           st))))
 
+; (MkVar Term) -> Goal
+(define (z/add-equality v t)
+  (lambdag@ (st)
+    (bind
+      ((z/internal `(assert (= ,v ,t))) st)
+      (z/varo t))))
+
 ; (State (AList MkVar Term)) -> (or #f State)
-(define (add-smt-disequality st D)
+(define (z/add-disequality st D)
   (let ((as (filter-smt-ok? st D)))
     (if (not (null? as))
         ((z/internal
@@ -102,7 +117,11 @@
                (c-M c))))))
 
 
-;; Back-end
+; Back-end
+;
+; Owns state-M.
+;
+; interface: z/internal, z/reset, z/purge
 
 ; ((ListOf Stmt)) -> Goal
 (define (z/internal stmt)
