@@ -549,6 +549,7 @@
             (if (c-M old-c)
                 (list (z/internal
                         `(assert (= ,(lhs a) ,(rhs a))))
+                      (z/varo (rhs a))
                          )
                 '())
             (map (lambda (atom) (absento atom (rhs a))) (c-A old-c))

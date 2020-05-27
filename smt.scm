@@ -280,10 +280,23 @@
         [(null? m) st]
         [(assoc (caar m) smtvar-to-mkvar)
          => (lambda (p)
-          (let ((st^ (== (cdr p) (cdar m))))
-	    ((add-model (cdr m)) st^)))]
+          (let-values (((S _) (unify (cdr p) (cdar m) (state-S st))))
+            (let ((st^ (state S (state-C st) (state-M st))))
+              ((add-model (cdr m)) st^))))]
         [else ((add-model (cdr m)) st)]
-         ))))
+        ))))
+
+(define (smt-symbols-to-vars v)
+  (cond
+    ((symbol? v)
+     (let ([r (assoc v smtvar-to-mkvar)])
+       (if r
+         (cdr r)
+         v)))
+    ((pair? v)
+     (cons (smt-symbols-to-vars (car v)) (smt-symbols-to-vars (cdr v))))
+    (else v)))
+
 
 (define assert-neg-model
   (lambda (m)
@@ -294,7 +307,7 @@
                           )) m)])
       (if (null? m)
           fail
-          (z/internal `(assert ,(cadr (neg-model m))))))))
+          (z/internal `(assert ,(smt-symbols-to-vars (cadr (neg-model m)))))))))
 
 (define z/purge
   (lambdag@ (st)
@@ -310,6 +323,8 @@
                                (choice
                                  (let ((st^ (state-with-M st '())))
                                    ((add-model m) st^))
-                                 (let ((st^ ((assert-neg-model m) st)))
-                                   ((loop) st^)))))))
+                                 (lambda ()
+                                   (let ((st^ ((assert-neg-model m) st)))
+                                     (and st^
+                                      ((loop) st^)))))))))
               st))))))
