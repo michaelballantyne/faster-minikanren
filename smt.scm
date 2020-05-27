@@ -194,7 +194,7 @@
   (reset-relevant-smtvars!))
 
 ; () -> Assm
-(define (fresh-assumption!)
+(define (do-fresh-assumption!)
   (define assm
     (string->symbol
       (string-append "_a" (number->string assumption-count))))
@@ -206,14 +206,21 @@
     [,_ (void)])
   assm)
 
-; (SMTExpr Assm) -> Void
-(define (add-assertion-to-assumption! e assm)
-  (set! assertion-to-assumption
-    (cons (cons e assm) assertion-to-assumption)))
+; (MkVar SMTType) -> Void
+(define (do-declare! v as-type)
+  (set! declared-types (subst-map-add declared-types v as-type))
+  (call-z3 `((declare-const ,(reify-to-smt-symbols v) ,as-type))))
 
-; () -> Void
-(define (reset-relevant-smtvars!)
-  (set! relevant-smtvar-to-mkvar '()))
+; (Assm SMTExpr) -> Void
+(define (do-assert! assm e)
+  (set! assertion-to-assumption
+    (cons (cons e assm) assertion-to-assumption))
+  (let ([e^ (wrap-neg (reify-to-smt-symbols e))])
+    (match (mode)
+      [naive
+        (call-z3 `((assert ,e^)))]
+      [(assumptions ,_)
+       (call-z3 `((assert (=> ,assm ,e^))))])))
 
 ; (SMTExpr) -> Void
 (define (record-relevant-smtvars! e)
@@ -225,6 +232,9 @@
             (cons (cons smt-var v) relevant-smtvar-to-mkvar)))))
     (vars e '())))
 
+; () -> Void
+(define (reset-relevant-smtvars!)
+  (set! relevant-smtvar-to-mkvar '()))
 
 
 ; (State) -> (or #f State)
@@ -280,12 +290,10 @@
   (let ([existing-decl-type (declared-type v)])
     (cond
       [(not existing-decl-type)
-       (set! declared-types (subst-map-add declared-types v as-type))
-       (call-z3 `((declare-const ,(reify-to-smt-symbols v) ,as-type)))]
+       (do-declare! v as-type)]
       [(eq? as-type existing-decl-type)
        (void)]
       [else (error 'z/ "Inconsistent SMT types")])))
-
 
 ; (SMTExpr) -> Assm
 ; Returns the assumption variable corresponding to the
@@ -295,20 +303,14 @@
     [(,_ . ,assm)
      assm]
     [#f
-     (define e^ (wrap-neg (reify-to-smt-symbols e)))
-     (define assm (fresh-assumption!))
-     (add-assertion-to-assumption! e assm)
      (for-each
        (lambda (v)
          (when (not (declared-type v))
            (ensure-declared! v 'Int)))
        (vars e '()))
-     (match (mode)
-       [naive
-        (call-z3 `((assert ,e^)))]
-       [(assumptions ,_)
-        (call-z3 `((assert (=> ,assm ,e^))))])
-     assm]))
+     (let ([assm (do-fresh-assumption!)])
+       (do-assert! assm e)
+       assm)]))
 
 ; () -> Void
 (define (z/check-sat)
