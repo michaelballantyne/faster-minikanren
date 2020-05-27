@@ -4,6 +4,13 @@
   (display thing)
   (newline))
 
+(define (sexp-map f sexp)
+  (cond
+    ((pair? sexp)
+     (f (cons (sexp-map f (car sexp)) (sexp-map f (cdr sexp)))))
+    (else (f sexp))))
+
+
 ; (Parameter (or 'naive '(assumptions <max-assumptions>))
 (define mode (make-parameter 'naive))
 ;(define mode (make-parameter '(assumptions 1000)))
@@ -37,7 +44,7 @@
 ; (state-M st) : (ListOf Stmts)  in reverse order.
 
 (define (state-add-statement st stmt)
-  (state-with-M st (cons stmt (state-M st))))
+  (state-M-set st (cons stmt (state-M st))))
 
 (define (state-statements st)
   (reverse (state-M st)))
@@ -48,22 +55,21 @@
 
 ; (Term) -> SExpr
 ; replaces all miniKanren variables in a term with symbols like _v0 for the solver.
-(define (reify-to-smt-symbols v)
-  (cond
-    ((var? v)
-     (reify-v-name v))
-    ((pair? v)
-     (cons (reify-to-smt-symbols (car v)) (reify-to-smt-symbols (cdr v))))
-    (else v)))
+(define (reify-to-smt-symbols e)
+  (sexp-map
+    (lambda (sexp)
+      (if (var? sexp)
+        (reify-v-name sexp)
+        sexp))
+    e))
 
 (define (wrap-neg e)
-  (if (number? e)
-      (if (< e 0)
-	  `(- ,(- e))
-	  e)
-      (if (pair? e)
-	  (cons (wrap-neg (car e)) (wrap-neg (cdr e)))
-	  e)))
+  (sexp-map
+    (lambda (sexp)
+      (if (and (number? sexp) (< sexp 0))
+          `(- ,(- sexp))
+          sexp))
+    e))
 
 ;; Back-end
 
@@ -83,6 +89,7 @@
 ; (AList ReifiedAssertion Assm)
 (define assertion-to-assumption #f)
 
+; (AList Symbol MkVar)
 (define relevant-smtvar-to-mkvar #f)
 
 
@@ -92,7 +99,8 @@
   (set! all-assumptions '())
   (set! declared-types empty-subst-map)
   (set! assertion-to-assumption '())
-  (set! relevant-smtvar-to-mkvar '()))
+  (reset-relevant-smtvars!))
+
 
 (define (fresh-assumption!)
   (define assm
@@ -106,15 +114,31 @@
     [,_ (void)])
   assm)
 
+
 (define (add-assertion-to-assumption! e assm)
   (set! assertion-to-assumption
     (cons (cons e assm) assertion-to-assumption)))
 
 
+(define (reset-relevant-smtvars!)
+  (set! relevant-smtvar-to-mkvar '()))
+
+(define (record-relevant-smtvars! e)
+  (for-each
+    (lambda (v)
+      (let ([smt-var (reify-v-name v)])
+        (when (not (assoc smt-var relevant-smtvar-to-mkvar))
+          (set! relevant-smtvar-to-mkvar
+            (cons (cons smt-var v) relevant-smtvar-to-mkvar)))))
+    (vars e '())))
+
+
+
 (define (check st)
   (define all-stmts (state-statements st))
 
-  (set! relevant-smtvar-to-mkvar '())
+  ; I hate the side effects on this var!
+  (reset-relevant-smtvars!)
 
   (match (mode)
     [naive
@@ -143,6 +167,7 @@
         [(declare-const ,v ,t)
          (ensure-declared! v t)]
         [(assert ,e)
+         (record-relevant-smtvars! e)
          (add-assm! (ensure-assert! e))]))
     all-statements)
 
@@ -169,12 +194,7 @@
 ; Returns the assumption variable corresponding to the
 ;  assertion.
 (define (ensure-assert! e)
-  (for-each
-    (lambda (v)
-    (let ([smt-var (reify-v-name v)])
-           (when (not (assoc smt-var relevant-smtvar-to-mkvar))
-             (set! relevant-smtvar-to-mkvar (cons (cons smt-var v) relevant-smtvar-to-mkvar)))))
-    (vars e '()))
+
   (match (assoc e assertion-to-assumption)
     [(,_ . ,assm)
      assm]
@@ -201,13 +221,13 @@
   (call-z3 `((check-sat-assuming
                ,(pos-assms->all-literals a)))))
 
+; In my testing with z3, this doesn't appear to help vs just asserting the positives
 (define (pos-assms->all-literals pos)
   (map (lambda (b)
          (if (memq b pos)
            b
            `(not ,b)))
-       all-assumptions)
-  )
+       all-assumptions))
 
 
 (define (smt-ok? st x)
@@ -269,40 +289,37 @@
 	 (z/varo (car vs))
 	 (lambda (st) (loop (cdr vs) st))))))
 
+; Model = (Alist Var Number)
+; (Model) -> State
 (define add-model
   (lambda (m)
     (lambdag@ (st)
+      (foldl (lambda (p st)
+               (let-values (((S _) (unify (car p) (cdr p) (state-S st))))
+                 (when (not S)
+                   (error 'add-model "model fails mK constraints; mk constraints not soundly reflected to SMT"))
+                 (state-S-set st S)))
+             st
+             m))))
+
+(define (smt-symbols-to-vars e)
+  (sexp-map
+    (lambda (sexp)
       (cond
-        [(null? m) st]
-        [(assoc (caar m) relevant-smtvar-to-mkvar)
-         => (lambda (p)
-          (let-values (((S _) (unify (cdr p) (cdar m) (state-S st))))
-            (let ((st^ (state S (state-C st) (state-M st))))
-              ((add-model (cdr m)) st^))))]
-        [else ((add-model (cdr m)) st)]
-        ))))
+        [(and (symbol? sexp)
+              (assoc sexp relevant-smtvar-to-mkvar))
+         => (lambda (p) (cdr p))]
+        [else sexp]))
+    e))
 
-(define (smt-symbols-to-vars v)
-  (cond
-    ((symbol? v)
-     (let ([r (assoc v relevant-smtvar-to-mkvar)])
-       (if r
-         (cdr r)
-         v)))
-    ((pair? v)
-     (cons (smt-symbols-to-vars (car v)) (smt-symbols-to-vars (cdr v))))
-    (else v)))
+(define (assert-neg-model m)
+  (if (null? m)
+    fail
+    (z/internal (neg-model m))))
 
-
-(define assert-neg-model
-  (lambda (m)
-    (let* ([m
-            (filter (lambda (x) ; ignoring functions
-                      (assoc (car x) relevant-smtvar-to-mkvar))
-                    m)])
-      (if (null? m)
-          fail
-          (z/internal `(assert ,(smt-symbols-to-vars (cadr (neg-model m)))))))))
+(define (get-relevant-model)
+  (filter (lambda (p) (var? (car p)))
+          (smt-symbols-to-vars (get-model-inc))))
 
 (define z/purge
   (lambdag@ (st)
@@ -313,10 +330,10 @@
               #f
               ((let loop ()
                  (lambdag@ (st)
-                           (let ((m (get-model-inc)))
+                           (let ((m (get-relevant-model)))
                              (let ((st (state-with-scope st (new-scope))))
                                (choice
-                                 (let ((st^ (state-with-M st '())))
+                                 (let ((st^ (state-M-set st '())))
                                    ((add-model m) st^))
                                  (let ([neg-model-g (assert-neg-model m)])
                                    (lambda ()

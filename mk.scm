@@ -197,9 +197,11 @@
 (define state-S (lambda (st) (car st)))
 (define state-C (lambda (st) (cadr st)))
 (define state-M (lambda (st) (caddr st)))
-(define state-with-M
-  (lambda (st M)
-    (state (state-S st) (state-C st) M)))
+
+(define (state-S-set st S)
+  (state S (state-C st) (state-M st)))
+(define (state-M-set st M)
+  (state (state-S st) (state-C st) M))
 
 (define empty-state (state empty-subst empty-C '()))
 
