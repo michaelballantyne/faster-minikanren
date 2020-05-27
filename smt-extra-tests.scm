@@ -154,3 +154,40 @@
            (== x y)
            (== y 2))
       '())
+
+(test "decl"
+      (run 2 (x)
+           (z/ `(declare-const ,x Int)))
+      '((_.0 (num _.0))))
+
+(test "decl2"
+      (run 2 (x)
+           (z/ `(declare-const ,x Int))
+           (symbolo x))
+      '())
+
+(test "decl3"
+      (run 2 (x)
+           (symbolo x)
+           (z/ `(declare-const ,x Int)))
+      '())
+
+
+(test "type-1"
+      (run 2 (x)
+           (symbolo x)
+           (z/assert `(= ,x ,x)))
+      '())
+
+(test "type-2"
+      (run 2 (x)
+           (z/assert `(= ,x ,x))
+           (symbolo x))
+      '())
+
+(test "enum"
+      (run 2 (x)
+           (z/assert `(= ,x ,x)))
+      '(0 1))
+
+

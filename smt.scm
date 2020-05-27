@@ -39,7 +39,10 @@
        [,other (error 'z/ "Only Int and Real types are supported")])
      (when (not (var? v))
        (error 'z/ "Expected logic variable in declare-const"))
-     (z/internal stmt)]
+     (lambdag@ (st)
+       (bind
+         ((z/varo v) st)
+         (z/internal stmt)))]
     [(assert ,e)
      (lambdag@ (st)
        (let ((e^ (walk* e (state-S st))))
@@ -60,8 +63,9 @@
 ; (MkVar) -> Goal
 (define (z/varo u)
   (lambdag@ (st)
-    (let ((term (walk u (state-S st))))
-      (if (var? term)
+    (bind
+      (let ((term (walk u (state-S st))))
+        (if (var? term)
           (let* ((c (lookup-c term st))
                  (M (c-M c))
                  (D (c-D c)))
@@ -70,7 +74,8 @@
               (z/add-disequality
                 (set-c term (c-with-M c #t) st)
                 D)))
-          st))))
+          st))
+      (numbero u))))
 
 ; (MkVar Term) -> Goal
 (define (z/add-equality v t)
