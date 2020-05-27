@@ -181,17 +181,13 @@
 ; (AList ReifiedAssertion Assm)
 (define assertion-to-assumption #f)
 
-; (AList Symbol MkVar)
-(define relevant-smtvar-to-mkvar #f)
-
 ; () -> Void
 (define (z/reset!)
   (call-z3 '((reset)))
   (set! assumption-count 0)
   (set! all-assumptions '())
   (set! declared-types empty-subst-map)
-  (set! assertion-to-assumption '())
-  (reset-relevant-smtvars!))
+  (set! assertion-to-assumption '()))
 
 ; () -> Assm
 (define (do-fresh-assumption!)
@@ -222,43 +218,30 @@
       [(assumptions ,_)
        (call-z3 `((assert (=> ,assm ,e^))))])))
 
-; (SMTExpr) -> Void
-(define (record-relevant-smtvars! e)
-  (for-each
-    (lambda (v)
-      (let ([smt-var (reify-v-name v)])
-        (when (not (assoc smt-var relevant-smtvar-to-mkvar))
-          (set! relevant-smtvar-to-mkvar
-            (cons (cons smt-var v) relevant-smtvar-to-mkvar)))))
-    (vars e '())))
-
-; () -> Void
-(define (reset-relevant-smtvars!)
-  (set! relevant-smtvar-to-mkvar '()))
-
-
 ; (State) -> (or #f State)
 (define (check st)
-  (define all-stmts (state-statements st))
+  (maybe-reset!)
+  (let ((assms (replay! (state-statements st))))
+    (do-check-sat assms)
+    (and (read-sat) st)))
 
-  ; I hate the side effects on this var!
-  (reset-relevant-smtvars!)
-
+; () -> Void
+(define (maybe-reset!)
   (match (mode)
-    [naive
-      (z/reset!)
-      (replay! all-stmts)
-      (z/check-sat)]
+    [naive (z/reset!)]
     [(assumptions ,max-assms)
      (when (> assumption-count max-assms)
        (printf "gc z3...\n")
-       (z/reset!))
-     (let ([assms (replay! all-stmts)])
-       (z/check-sat-assuming assms))])
+       (z/reset!))]))
 
-  (if (read-sat)
-    st
-    #f))
+; ((ListOf Assms)) -> Bool
+(define (do-check-sat assms)
+  (match (mode)
+    [naive
+     (call-z3 '((check-sat)))]
+    [(assumptions ,_)
+     (call-z3 `((check-sat-assuming
+               ,(pos-assms->all-literals assms))))]))
 
 ; ((ListOf Stmt)) -> (ListOf Assm)
 (define (replay! all-statements)
@@ -272,7 +255,6 @@
         [(declare-const ,v ,t)
          (ensure-declared! v t)]
         [(assert ,e)
-         (record-relevant-smtvars! e)
          (add-assm! (ensure-assert! e))]))
     all-statements)
 
@@ -312,15 +294,6 @@
        (do-assert! assm e)
        assm)]))
 
-; () -> Void
-(define (z/check-sat)
-  (call-z3 '((check-sat))))
-
-; ((ListOf Assm)) -> Void
-(define (z/check-sat-assuming a)
-  (call-z3 `((check-sat-assuming
-               ,(pos-assms->all-literals a)))))
-
 ; ((ListOf Assm)) -> (ListOf SMTExpr)
 ; In my testing with z3, this doesn't appear to help vs just asserting the positives
 (define (pos-assms->all-literals pos)
@@ -329,7 +302,6 @@
            b
            `(not ,b)))
        all-assumptions))
-
 
 ; Goal
 (define z/purge
@@ -349,20 +321,44 @@
 ; Model = (Alist Var Number)
 ; (State) -> (or #f Model)
 (define (check/relevant-model st)
-  (and (check st) (get-relevant-model)))
+  (and (check st)
+       (get-relevant-model st)))
 
-; () -> Model
-(define (get-relevant-model)
+; ((ListOf MkVar)) -> Model
+(define (get-relevant-model st)
   (filter (lambda (p) (var? (car p)))
-          (smt-symbols-to-vars (get-model-inc))))
+          (smt-symbols-to-vars (get-model-inc) (relevant-vars st))))
 
-; SExp -> SExp
-(define (smt-symbols-to-vars e)
+; (State) -> (ListOf MkVar)
+; Pure
+(define (relevant-vars st)
+  (define res '())
+  (define (add-res! v)
+    (when (not (member v res))
+      (set! res (cons v res))))
+
+  (for-each
+    (lambda (stmt)
+      (match stmt
+        [(assert ,e)
+          (for-each add-res! (vars e '()))]
+        [,_ (void)]))
+    (state-M st))
+
+  res)
+
+; (SExp (ListOf MkVar)) -> SExp
+; Pure
+(define (smt-symbols-to-vars e vars)
+  (define smtvar-to-mkvar
+    (map (lambda (v) (cons (reify-v-name v) v))
+         vars))
+
   (sexp-map
     (lambda (sexp)
       (cond
         [(and (symbol? sexp)
-              (assoc sexp relevant-smtvar-to-mkvar))
+              (assoc sexp smtvar-to-mkvar))
          => (lambda (p) (cdr p))]
         [else sexp]))
     e))
