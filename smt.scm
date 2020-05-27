@@ -1,59 +1,132 @@
 (load "match.scm")
 
+; (Parameter (or 'naive '(assumptions <max-assumptions>))
+(define mode (make-parameter 'naive))
+;(define mode (make-parameter '(assumptions 1000)))
+
 (define (displayln thing)
   (display thing)
   (newline))
 
+; (((SExp) -> SExp) SExp) -> SExp
+; Pure
 (define (sexp-map f sexp)
   (cond
     ((pair? sexp)
      (f (cons (sexp-map f (car sexp)) (sexp-map f (cdr sexp)))))
     (else (f sexp))))
 
-
-; (Parameter (or 'naive '(assumptions <max-assumptions>))
-(define mode (make-parameter 'naive))
-;(define mode (make-parameter '(assumptions 1000)))
-
 ; Front-end
 
+; (SMTExpr) -> Goal
 (define (z/assert e)
   (z/ `(assert ,e)))
 
+; (Stmt) -> Goal
 (define (z/ stmt)
-  (lambda (st)
-    (match stmt
-      [(declare-const ,v ,t)
-       (match t
-         [Int #t] [Real #t]
-	 [,other (error 'z/ "Only Int and Real types are supported")])
-       (when (not (var? v))
-	 (error 'z/ "Expected logic variable in declare-const"))
-       ((z/internal stmt) st)]
-      [(assert ,e)
-       (let* ((e^ (walk* e (state-S st)))
-	      (st^ (add-varos e^ st)))
-	 ((z/internal `(assert ,e^)) st^))]
-      [,other (error 'z/ "Only declare-const and assert are supported")])))
+  (match stmt
+    [(declare-const ,v ,t)
+     (match t
+       [Int #t] [Real #t]
+       [,other (error 'z/ "Only Int and Real types are supported")])
+     (when (not (var? v))
+       (error 'z/ "Expected logic variable in declare-const"))
+     (z/internal stmt)]
+    [(assert ,e)
+     (lambdag@ (st)
+       (let ((e^ (walk* e (state-S st))))
+         (bind
+           (add-varos e^ st)
+           (z/internal `(assert ,e^)))))]
+    [,other (error 'z/ "Only declare-const and assert are supported")]))
 
+; (SMTExpr State) -> (or #f State)
+(define (add-varos e st)
+  (foldl (lambda (v st)
+           (bind
+             st
+             (z/varo v)))
+          st
+          (vars e '())))
+
+; (MkVar) -> Goal
+(define (z/varo u)
+  (lambdag@ (st)
+    (let ((term (walk u (state-S st))))
+      (if (var? term)
+          (let* ((c (lookup-c term st))
+                 (M (c-M c))
+                 (D (c-D c)))
+            (if M
+              st
+              (add-smt-disequality
+                (set-c term (c-with-M c #t) st)
+                D)))
+          st))))
+
+; (State (AList MkVar Term)) -> (or #f State)
+(define (add-smt-disequality st D)
+  (let ((as (filter-smt-ok? st D)))
+    (if (not (null? as))
+        ((z/internal
+         `(assert
+            (and
+              ,@(map
+                  (lambda (cs)
+                    `(or
+                       ,@(map
+                           (lambda (ds)
+                             `(not (= ,(car ds) ,(cdr ds))))
+                           cs)))
+                  as))))
+          st)
+        st)))
+
+; (State (AList MkVar Term)) -> (AList MkVar Term)
+; Pure
+(define (filter-smt-ok? st D)
+  (filter
+   (lambda (cs)
+     (for-all (lambda (ds)
+                (and (smt-ok? st (car ds)) (smt-ok? st (cdr ds))))
+              cs))
+   D))
+
+; (State Term) -> Bool
+; Pure
+(define (smt-ok? st x)
+  (let ((x (walk* x (state-S st))))
+    (or (number? x)
+        (and (var? x)
+             (let ((c (lookup-c x st)))
+               (c-M c))))))
+
+
+;; Back-end
+
+; ((ListOf Stmt)) -> Goal
 (define (z/internal stmt)
   (lambda (st)
     (check
       (state-add-statement st stmt))))
 
-; (state-M st) : (ListOf Stmts)  in reverse order.
+; (state-M st) : (ListOf Stmt)  in reverse order.
 
 (define (state-add-statement st stmt)
   (state-M-set st (cons stmt (state-M st))))
 
+; (State) -> (ListOf Stmt)
+; Pure
 (define (state-statements st)
   (reverse (state-M st)))
 
 ; (Var) -> Symbol
+; Pure
 (define (reify-v-name v)
   (string->symbol (string-append "_v" (number->string (var-idx v)))))
 
 ; (Term) -> SExpr
+; Pure
 ; replaces all miniKanren variables in a term with symbols like _v0 for the solver.
 (define (reify-to-smt-symbols e)
   (sexp-map
@@ -63,6 +136,8 @@
         sexp))
     e))
 
+; SMTExpr -> SMTExpr
+; Pure
 (define (wrap-neg e)
   (sexp-map
     (lambda (sexp)
@@ -70,8 +145,6 @@
           `(- ,(- sexp))
           sexp))
     e))
-
-;; Back-end
 
 ; State; initialized in `z/reset!`
 
@@ -92,7 +165,7 @@
 ; (AList Symbol MkVar)
 (define relevant-smtvar-to-mkvar #f)
 
-
+; () -> Void
 (define (z/reset!)
   (call-z3 '((reset)))
   (set! assumption-count 0)
@@ -101,7 +174,7 @@
   (set! assertion-to-assumption '())
   (reset-relevant-smtvars!))
 
-
+; () -> Assm
 (define (fresh-assumption!)
   (define assm
     (string->symbol
@@ -114,15 +187,16 @@
     [,_ (void)])
   assm)
 
-
+; (SMTExpr Assm) -> Void
 (define (add-assertion-to-assumption! e assm)
   (set! assertion-to-assumption
     (cons (cons e assm) assertion-to-assumption)))
 
-
+; () -> Void
 (define (reset-relevant-smtvars!)
   (set! relevant-smtvar-to-mkvar '()))
 
+; (SMTExpr) -> Void
 (define (record-relevant-smtvars! e)
   (for-each
     (lambda (v)
@@ -134,6 +208,7 @@
 
 
 
+; (State) -> (or #f State)
 (define (check st)
   (define all-stmts (state-statements st))
 
@@ -156,6 +231,7 @@
     st
     #f))
 
+; ((ListOf Stmt)) -> (ListOf Assm)
 (define (replay! all-statements)
   (define assms '())
   (define (add-assm! assm)
@@ -173,12 +249,14 @@
 
   assms)
 
+; (MkVar) -> (or #f SMTType)
 (define (declared-type v)
   (let ([t (subst-map-lookup v declared-types)])
     (if (eq? t unbound)
       #f
       t)))
 
+; (MkVar SMTType) -> Void
 (define (ensure-declared! v as-type)
   (let ([existing-decl-type (declared-type v)])
     (cond
@@ -194,7 +272,6 @@
 ; Returns the assumption variable corresponding to the
 ;  assertion.
 (define (ensure-assert! e)
-
   (match (assoc e assertion-to-assumption)
     [(,_ . ,assm)
      assm]
@@ -208,19 +285,22 @@
            (ensure-declared! v 'Int)))
        (vars e '()))
      (match (mode)
-            [naive
-              (call-z3 `((assert ,e^)))]
-            [(assumptions ,_)
-             (call-z3 `((assert (=> ,assm ,e^))))])
+       [naive
+        (call-z3 `((assert ,e^)))]
+       [(assumptions ,_)
+        (call-z3 `((assert (=> ,assm ,e^))))])
      assm]))
 
+; () -> Void
 (define (z/check-sat)
   (call-z3 '((check-sat))))
 
+; ((ListOf Assm)) -> Void
 (define (z/check-sat-assuming a)
   (call-z3 `((check-sat-assuming
                ,(pos-assms->all-literals a)))))
 
+; ((ListOf Assm)) -> (ListOf SMTExpr)
 ; In my testing with z3, this doesn't appear to help vs just asserting the positives
 (define (pos-assms->all-literals pos)
   (map (lambda (b)
@@ -230,89 +310,32 @@
        all-assumptions))
 
 
-(define (smt-ok? st x)
-  (let ((x (walk* x (state-S st))))
-    (or (number? x)
-        (and (var? x)
-             (let ((c (lookup-c x st)))
-               (c-M c))))))
-
-(define (filter-smt-ok? st D)
-  (filter
-   (lambda (cs)
-     (for-all (lambda (ds)
-                (and (smt-ok? st (car ds)) (smt-ok? st (cdr ds))))
-              cs))
-   D))
-
-(define (add-smt-disequality st D)
-  (let ((as (filter-smt-ok? st D)))
-    (if (not (null? as))
-        ((z/internal
-         `(assert
-            (and
-              ,@(map
-                  (lambda (cs)
-                    `(or
-                       ,@(map
-                           (lambda (ds)
-                             `(not (= ,(car ds) ,(cdr ds))))
-                           cs)))
-                  as))))
-          st)
-        st)))
-
-(define (z/varo u)
-  (lambdag@ (st)
-    (let ((term (walk u (state-S st))))
-      (if (var? term)
-          (let* ((c (lookup-c term st))
-                 (M (c-M c))
-                 (D (c-D c)))
-            (if M
-              st
-              (add-smt-disequality
-                (set-c term (c-with-M c #t) st)
-                D)))
-          st))))
-
-(define (add-varos e st)
-  (foldl (lambda (v st)
-           (bind
-             st
-             (z/varo v)))
-          st
-          (vars e '())))
-
+; Goal
 (define z/purge
   (lambdag@ (st)
-    (let ((M (state-M st)))
-      (if (null? M)
-          st
-          (let loop-g ([st^ st])
-            (let ([m (check/relevant-model st^)])
-              (if (not m)
-                (mzero)
-                ((conde
-                   [(add-model m)]
-                   [(assert-neg-model m)
-                    loop-g])
-                 st^))))))))
+    (if (null? (state-M st))
+      st
+      (let loop-g ([st^ st])
+        (let ([m (check/relevant-model st^)])
+          (if (not m)
+            (mzero)
+            ((conde
+               [(add-model m)]
+               [(assert-neg-model m)
+                loop-g])
+             st^)))))))
 
 ; Model = (Alist Var Number)
 ; (State) -> (or #f Model)
-; EFFECT:
-;   solver state
-;   relevant-smtvar-to-mkvar
 (define (check/relevant-model st)
   (and (check st) (get-relevant-model)))
 
-; EFFECT
+; () -> Model
 (define (get-relevant-model)
   (filter (lambda (p) (var? (car p)))
           (smt-symbols-to-vars (get-model-inc))))
 
-; EFFECT
+; SExp -> SExp
 (define (smt-symbols-to-vars e)
   (sexp-map
     (lambda (sexp)
@@ -323,7 +346,7 @@
         [else sexp]))
     e))
 
-; (Model) -> State
+; (Model) -> Goal
 ; Pure
 (define add-model
   (lambda (m)
@@ -342,8 +365,4 @@
   (if (null? m)
     fail
     (lambda (st) (state-add-statement st (neg-model m)))))
-
-
-
-
 
