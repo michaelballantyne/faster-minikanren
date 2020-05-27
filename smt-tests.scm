@@ -5,9 +5,9 @@
 
 ;;(load "../clpsmt-miniKanren/z3-driver.scm")
 ;;(load "../clpsmt-miniKanren/cvc4-driver.scm")
-(load "../clpsmt-miniKanren/z3-server-robust.scm")
+(load "../clpsmt-miniKanren/z3-server.scm")
 ;;(load "../clpsmt-miniKanren/cvc4-server-robust.scm")
-;(load "../clpsmt-miniKanren/talk.scm")
+(load "../clpsmt-miniKanren/talk.scm")
 ;(load "../clpsmt-miniKanren/radi-tests.scm")
 ;(load "../clpsmt-miniKanren/radiw-concrete-tests.scm")
 ;;(load "../clpsmt-miniKanren/full-abstract-interp-extended-tests.scm")
