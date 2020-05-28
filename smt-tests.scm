@@ -1,5 +1,6 @@
 (load "mk-vicare.scm")
 (load "mk.scm")
+(load "match.scm")
 (load "smt.scm")
 (load "../clpsmt-miniKanren/test-check.scm")
 

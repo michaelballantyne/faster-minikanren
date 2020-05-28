@@ -1,5 +1,3 @@
-(load "match.scm")
-
 ; (Parameter (or 'naive '(assumptions <max-assumptions>))
 (define mode (make-parameter 'naive))
 ;(define mode (make-parameter '(assumptions 1000)))
