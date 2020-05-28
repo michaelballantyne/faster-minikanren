@@ -226,12 +226,20 @@
 ; (AList ReifiedAssertion Assm)
 (define assertion-to-assumption #f)
 
+(define (reset-state!)
+  (set! declared-types empty-subst-map)
+  (set! assertion-to-assumption '()))
+
+
+
 ; () -> Void
 (define (z/reset!)
-  (call-z3 '((reset)))
+  (call-z3 '((reset) (push 1)))
   (set! assumption-count 0)
   (set! all-assumptions '())
   (set! declared-types empty-subst-map)
+  (set! last-buffer '())
+  (set! current-buffer '())
   (set! assertion-to-assumption '()))
 
 ; () -> Assm
@@ -243,14 +251,14 @@
   (set! all-assumptions (cons assm all-assumptions))
   (match (mode)
     [(assumptions ,_)
-     (call-z3 `((declare-const ,assm Bool)))]
+     (prepare-statement! `(declare-const ,assm Bool))]
     [,_ (void)])
   assm)
 
 ; (MkVar SMTType) -> Void
 (define (do-declare! v as-type)
   (set! declared-types (subst-map-add declared-types v as-type))
-  (call-z3 `((declare-const ,(reify-to-smt-symbols v) ,as-type))))
+  (prepare-statement! `(declare-const ,(reify-to-smt-symbols v) ,as-type)))
 
 ; (Assm SMTExpr) -> Void
 (define (do-assert! assm e)
@@ -258,10 +266,11 @@
     (cons (cons e assm) assertion-to-assumption))
   (let ([e^ (wrap-neg (reify-to-smt-symbols e))])
     (match (mode)
-      [naive
-        (call-z3 `((assert ,e^)))]
       [(assumptions ,_)
-       (call-z3 `((assert (=> ,assm ,e^))))])))
+       (prepare-statement! `(assert (=> ,assm ,e^)))]
+      [,_
+        (prepare-statement! `(assert ,e^))]
+      )))
 
 ; (State) -> (or #f State)
 (define (z/check st . optional)
@@ -284,18 +293,36 @@
 ; () -> Void
 (define (maybe-reset!)
   (match (mode)
-    [naive (z/reset!)]
     [(assumptions ,max-assms)
      (when (> assumption-count max-assms)
        (printf "gc z3...\n")
-       (z/reset!))]))
+       (z/reset!))]
+    [naive (z/reset!)]
+    [reset-as-pop-push
+      (reset-state!)
+      (call-z3 '((pop 1) (push 1)))]
+    [push-pop (reset-state!)]))
 
 ; ((ListOf Assms)) -> Bool
 (define (do-check-sat assms)
   (match (mode)
     [naive
+     (call-z3 (reverse current-buffer))
+     (set! current-buffer '())
      (call-z3 '((check-sat)))]
+    [reset-as-pop-push
+     (call-z3 (reverse current-buffer))
+     (set! current-buffer '())
+     (call-z3 '((check-sat)))]
+    [push-pop
+      (let ([in-order (reverse current-buffer)])
+        (reconcile-state! in-order last-buffer)
+        (set! last-buffer in-order)
+        (set! current-buffer '())
+        (call-z3 '((check-sat))))]
     [(assumptions ,_)
+     (call-z3 (reverse current-buffer))
+     (set! current-buffer '())
      (call-z3 `((check-sat-assuming
                ,(pos-assms->all-literals assms))))]))
 
@@ -360,6 +387,39 @@
        (do-assert! assm e)
        assm)]))
 
+
+(define current-buffer '())
+
+(define last-buffer '())
+
+(define (prepare-statement! stmt)
+  (set! current-buffer (cons stmt current-buffer)))
+
+(define (find-common-prefix l1 l2 acc)
+  (if (and (pair? l1) (pair? l2) (equal? (car l1) (car l2)))
+    (find-common-prefix (cdr l1) (cdr l2) (cons (car l1) acc))
+    (reverse acc)))
+
+(define (rest-after-prefix l prefix)
+  (if (null? prefix)
+    l
+    (rest-after-prefix (cdr l) (cdr prefix))))
+
+(define (add-push-before-each l)
+  (if (null? l)
+    '()
+    (cons '(push 1) (cons (car l) (add-push-before-each (cdr l))))))
+
+(define (reconcile-state! new previous)
+  (let* ([common (find-common-prefix new previous '())]
+         ;[_ (begin
+              ;(displayln new)
+              ;(displayln previous)
+              ;(displayln common))]
+         [previous-suffix (rest-after-prefix previous common)]
+         [new-suffix (rest-after-prefix new common)])
+    (call-z3 `((pop ,(length previous-suffix))))
+    (call-z3 (add-push-before-each new-suffix))))
 
 
 ; Model = (Alist Var Number)
