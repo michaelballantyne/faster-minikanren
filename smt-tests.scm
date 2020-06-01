@@ -13,7 +13,8 @@
 ;(set! log-all-calls #t)
 
 ;(mode 'naive)
-;(mode `(assumptions 1000))
+;(mode `(assumptions 1000 #f))  ; don't assert negative assms. seems faster.
+;(mode `(assumptions 1000 #t))  ; asssert negative assms
 ;(mode 'push-pop)
 (mode 'reset-as-pop-push)
 

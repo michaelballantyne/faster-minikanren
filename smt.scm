@@ -1,6 +1,8 @@
-; (Parameter (or 'naive '(assumptions <max-assumptions>))
+; (Parameter (or 'naive
+;                'reset-as-pop-push
+;                'push-pop
+;                '(assumptions <max-assumptions> <assert-neg-lits?>))
 (define mode (make-parameter 'naive))
-;(define mode (make-parameter '(assumptions 1000)))
 
 (define (displayln thing)
   (display thing)
@@ -248,7 +250,7 @@
   (set! assumption-count (+ assumption-count 1))
   (set! all-assumptions (cons assm all-assumptions))
   (match (mode)
-    [(assumptions ,_)
+    [(assumptions ,_1 ,_2)
      (prepare-statement! `(declare-const ,assm Bool))]
     [,_ (void)])
   assm)
@@ -264,7 +266,7 @@
     (cons (cons e assm) assertion-to-assumption))
   (let ([e^ (wrap-neg (reify-to-smt-symbols e))])
     (match (mode)
-      [(assumptions ,_)
+      [(assumptions ,_1 ,_2)
        (prepare-statement! `(assert (=> ,assm ,e^)))]
       [,_
         (prepare-statement! `(assert ,e^))]
@@ -280,7 +282,7 @@
       [unsat #f]
       [unknown
        (match (mode)
-         [(assumptions ,_) (guard (null? optional))
+         [(assumptions ,_1 ,_2) (guard (null? optional))
           (displayln "got unknown; retrying after reset")
           (z/reset!)
           (z/check st #t)]
@@ -291,7 +293,7 @@
 ; () -> Void
 (define (maybe-reset!)
   (match (mode)
-    [(assumptions ,max-assms)
+    [(assumptions ,max-assms ,_)
      (when (> assumption-count max-assms)
        (printf "gc z3...\n")
        (z/reset!))]
@@ -318,20 +320,24 @@
         (set! last-buffer in-order)
         (set! current-buffer '())
         (call-z3 '((check-sat))))]
-    [(assumptions ,_)
+    [(assumptions ,_1 ,_2)
      (call-z3 (reverse current-buffer))
      (set! current-buffer '())
      (call-z3 `((check-sat-assuming
                ,(pos-assms->all-literals assms))))]))
 
 ; ((ListOf Assm)) -> (ListOf SMTExpr)
-; In my testing with z3, this doesn't appear to help vs just asserting the positives
 (define (pos-assms->all-literals pos)
-  (map (lambda (b)
-         (if (memq b pos)
-           b
-           `(not ,b)))
-       all-assumptions))
+  (match (mode)
+    [(assumptions ,_ ,assert-neg-lits?)
+     (if assert-neg-lits?
+       (map (lambda (b)
+              (if (memq b pos)
+                b
+                `(not ,b)))
+            all-assumptions)
+       pos)]
+    [,_ (error 'pos-assms->all-literals "should only be called for assumptions mode")]))
 
 
 ; ((ListOf Stmt)) -> (ListOf Assm)
@@ -339,6 +345,8 @@
   (define assms '())
   (define (add-assm! assm)
     (set! assms (cons assm assms)))
+  
+  ;(displayln (length all-statements))
 
   (for-each
     (lambda (stmt)
