@@ -8,7 +8,9 @@
          fresh
          conde
          symbolo numbero
-         absento)
+         absento
+         project
+         var?)
 
 ;; extra stuff for racket
 ;; due mostly to samth

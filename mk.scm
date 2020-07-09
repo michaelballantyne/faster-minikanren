@@ -139,7 +139,7 @@
 ;         calls). A given disequality constraint is only attached to
 ;         one of the variables involved, as all components of the
 ;         constraint must be violated to cause failure.
-;   A - list of absento constraints. Each constraint is a ground atom.
+;   A - list of absento constraints. Each constraint is a term.
 ;         The list contains no duplicates.
 
 (define empty-c `(#f () ()))
@@ -469,28 +469,30 @@
   (lambda (u v)
     (=/=* `((,u . ,v)))))
 
+;; Generalized 'absento': 'term1' can be any legal term (old version
+;; of faster-miniKanren required 'term1' to be a ground atom).
 (define absento
-  (lambda (ground-atom term)
-    (unless (or (symbol? ground-atom)
-                (number? ground-atom)
-                (boolean? ground-atom)
-                (null? ground-atom))
-      (error 'absento "first argument to absento must be a ground atom"))
+  (lambda (term1 term2)
     (lambdag@ (st)
-      (let ((term (walk term (state-S st))))
-        (cond
-          ((pair? term)
-           (let ((st^ ((absento ground-atom (car term)) st)))
-             (and st^ ((absento ground-atom (cdr term)) st^))))
-          ((eqv? term ground-atom) #f)
-          ((var? term)
-           (let* ((c (lookup-c term st))
-                  (A (c-A c)))
-             (if (memv ground-atom A)
-               st
-               (let ((c^ (c-with-A c (cons ground-atom A))))
-                 (set-c term c^ st)))))
-          (else st))))))
+      (let ((state (state-S st)))
+        (let ((term1 (walk term1 state))
+              (term2 (walk term2 state)))
+          (let ((st ((=/= term1 term2) st)))
+            (if st
+                (cond
+                  ((pair? term2)
+                   (let ((st^ ((absento term1 (car term2)) st)))
+                     (and st^ ((absento term1 (cdr term2)) st^))))            
+                  ((var? term2)
+                   (let* ((c (lookup-c term2 st))
+                          (A (c-A c)))
+                     (if (memv term1 A)
+                         st
+                         (let ((c^ (c-with-A c (cons term1 A))))
+                           (set-c term2 c^ st)))))
+                  (else st))
+                #f)))))))
+
 
 ; Fold lst with proc and initial value init. If proc ever returns #f,
 ; return with #f immediately. Used for applying a series of

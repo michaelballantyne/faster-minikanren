@@ -120,8 +120,7 @@
 
 (define subst-map-length t:size)
 
-; Returns #f if not found, or a pair of u and the result of the lookup.
-; This distinguishes between #f indicating absence and being the result.
+; Returns unbound if not found, or a pair of u and the result of the lookup.
 (define subst-map-lookup
   (lambda (u S)
     (let ((res (t:lookup (var-idx u) S)))
