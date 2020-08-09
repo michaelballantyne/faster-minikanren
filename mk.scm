@@ -594,32 +594,92 @@
       `(,(state-S st) () () () ())
       (remove-duplicates vs))))
 
-(define reify
-  (lambda (x)
-    (lambda (st)
-      (let ((c (c-from-st st x)))
-        (let ((c (cycle c)))
-          (let* ((S (c->S c))
-                 (D (walk* (c->D c) S))
-                 (Y (walk* (c->Y c) S))
-                 (N (walk* (c->N c) S))
-                 (T (walk* (c->T c) S)))
-            (let ((v (walk* x S)))
-              (let ((R (reify-S v (subst empty-subst-map
-                                         nonlocal-scope))))
-                (let ([any-var-unreified? (lambda (term) (anyvar? term R))])
-                  (reify+ v R
-                          ; Drop disequalities that are satisfiable in any
-                          ; assignment of the reified variables, because
-                          ; they refer to unassigned variables that are not
-                          ; part of the answer, which can be assigned as needed
-                          ; to satisfy the constraint.
-                          (let ((D (remp any-var-unreified? D)))
-                            (rem-subsumed-ds D))
-                          (remp any-var-unreified? Y)
-                          (remp any-var-unreified? N)
-                          (remp any-var-unreified? T)))))))))))
+(define (reify x)
+  (lambda (st)
+    (let* ((c (fixed-point-simplify (c-from-st st x)))
+           (S (c->S c)))
+      (let ((D (walk* (c->D c) S))
+            (Y (walk* (c->Y c) S))
+            (N (walk* (c->N c) S))
+            (T (walk* (c->T c) S)))
+        (let* ((v (walk* x S))
+               (R (reify-S v (subst empty-subst-map nonlocal-scope)))
+               (any-var-unreified? (lambda (term) (anyvar? term R))))
+          (reify+ v R
+                  ; Drop disequalities that are satisfiable in any
+                  ; assignment of the reified variables, because
+                  ; they refer to unassigned variables that are not
+                  ; part of the answer, which can be assigned as needed
+                  ; to satisfy the constraint.
+                  (let ((D^ (remp any-var-unreified? D)))
+                    (rem-subsumed d-subsumed-by? D^))
+                  (remp any-var-unreified? Y)
+                  (remp any-var-unreified? N)
+                  (let ((T^ (remp any-var-unreified? T)))
+                    (rem-subsumed t-subsumed-by? T^))))))))
 
+(define (app1 f c) (f c))
+
+(define (fixed-point f arg)
+  (let ((r (f arg)))
+    (if (eq? r arg)
+      r
+      (fixed-point f r))))
+
+(define (fixed-point-simplify c)
+  (define (apply-all-simplifications c)
+    (foldl app1 c
+           (list drop-D-b/c-Y-or-N
+                 move-T-to-D-b/c-t2-atom
+                 drop-from-D-b/c-T
+                 drop-t-b/c-t2-occurs-t1)))
+  (fixed-point apply-all-simplifications c))
+
+(define anyvar?
+  (lambda (u r)
+    (cond
+      ((pair? u)
+       (or (anyvar? (car u) r)
+           (anyvar? (cdr u) r)))
+      (else (var? (walk u r))))))
+
+(define (rem-subsumed subsumed-by? el*)
+  (define (subsumed-by-one-of? el el*)
+    (ormap (lambda (el2) (subsumed-by? el el2)) el*))
+
+  (let loop ((el* el*)
+             (result '()))
+    (cond
+      ((null? el*) result)
+      (else
+        (let ((el (car el*)))
+          (cond
+            ((or (subsumed-by-one-of? el (cdr el*))
+                 (subsumed-by-one-of? el result))
+             (loop (cdr el*) result))
+            (else (loop (cdr el*)
+                        (cons el result)))))))))
+
+; Examples:
+; * (absento `(cat . ,S) y) is subsumed by (absento S y)
+;
+; Note that absento constraints are pushed down to tree leaves, so we would never have
+;  (absento 'closure q) given (== q (list x)). Thus we do not need to consider subsumption
+;  between absento constraints on q and x.
+(define (t-subsumed-by? t1 t2)
+  (and (var-eq? (rhs t1) (rhs t2)) (member* (lhs t2) (lhs t1))))
+
+; (-> disequality/c disequality/c boolean?)
+; Examples:
+;  * ((a . 5) (b . 6)) is subsumed by ((a . 5)) because (not (== a 5)) is a stronger constraint
+;    than (not (and (== a 5) (== b 6)))
+(define (d-subsumed-by? d1 d2)
+  (let*-values (((S ignore) (unify* d1 (subst empty-subst-map nonlocal-scope)))
+                ((S+ added) (unify* d2 S)))
+               (and S+ (null? added))))
+
+(define (reify+ v R D Y N T)
+  (form (walk* v R) (walk* D R) (walk* Y R) (walk* N R) (walk* T R)))
 
 ; Bits from the old constraint implementation, still used for
 ; reification.
@@ -706,13 +766,6 @@
     (call-with-string-output-port
       (lambda (p) (display x p)))))
 
-(define anyvar?
-  (lambda (u r)
-    (cond
-      ((pair? u)
-       (or (anyvar? (car u) r)
-           (anyvar? (cdr u) r)))
-      (else (var? (walk u r))))))
 
 (define member*
   (lambda (u v)
@@ -809,7 +862,7 @@
            (lambda (d)
              (exists
                (lambda (t)
-                 (subsumed-by? d (list t)))
+                 (d-subsumed-by? d (list t)))
                T))
          D) =>
          (lambda (d) `(,S ,(remq1 d D) ,Y ,N ,T)))
@@ -842,8 +895,10 @@
                   d))
         D))))
 
-;; (run 1 (x y) (symbolo x) (numbero y) (=/= x y))
-;; (run 1 (x y) (=/= x y) (symbolo x) (numbero y))
+; Drops disequalities that are fully satisfied because the types are disjoint
+; either due to type constraints or ground values.
+; Examples:
+;  * given (symbolo x) and (numbero y), (=/= x y) is dropped.
 (define drop-D-b/c-Y-or-N
   (lambdar@ (c : S D Y N T)
     (cond
@@ -851,20 +906,7 @@
        (lambda (d) `(,S ,(remq1 d D) ,Y ,N ,T)))
       (else c))))
 
-(define cycle
-  (lambdar@ (c)
-    (let loop ((c^ c)
-               (fns^ (LOF))
-               (n (length (LOF))))
-      (cond
-        ((zero? n) c^)
-        ((null? fns^) (loop c^ (LOF) n))
-        (else
-         (let ((c^^ ((car fns^) c^)))
-           (cond
-             ((not (eq? c^^ c^))
-              (loop c^^ (cdr fns^) (length (LOF))))
-             (else (loop c^ (cdr fns^) (sub1 n))))))))))
+
 
 (define mem-check
   (lambda (u t S)
@@ -896,15 +938,6 @@
 
 (define ground-non-number?
   (ground-non-<type>? number?))
-
-
-(define reify+
-  (lambda (v R D Y N T)
-    (form (walk* v R)
-          (walk* D R)
-          (walk* Y R)
-          (walk* N R)
-          (rem-subsumed-T (walk* T R)))))
 
 (define form
   (lambda (v D Y N T)
@@ -958,65 +991,6 @@
         ((lex<=? r l) `(,r . ,l))
         (else pr)))))
 
-; Given a list of non-falsified disequalities, drops elements to produce a
-; result where no disequality subsumes another.
-(define (rem-subsumed-ds D)
-  (let loop ((D D)
-             (result '()))
-    (cond
-      ((null? D) result)
-      ((or (subsumed-by-one-of? (car D) (cdr D))
-           (subsumed-by-one-of? (car D) result))
-       (loop (cdr D) result))
-      (else (loop (cdr D)
-                  (cons (car D) result))))))
 
-; (-> disequality/c disequality/c boolean?)
-; Examples:
-;  d1: ((a . 5) (b . 6))
-;  d2: ((a . 5))
-;  -> #t  because (not (== a 5)) is a stronger constraint than
-;                 (not (and (== a 5) (== b 6)))
-(define (subsumed-by? d1 d2)
-  (let*-values (((S ignore) (unify* d1 (subst empty-subst-map nonlocal-scope)))
-                ((S+ added) (unify* d2 S)))
-               (and S+ (null? added))))
 
-(define (subsumed-by-one-of? d d*)
-  (ormap (lambda (el) (subsumed-by? d el)) d*))
-
-(define rem-subsumed-T
-  (lambda (T)
-    (let rem-subsumed ((T T) (T^ '()))
-      (cond
-        ((null? T) T^)
-        (else
-         (let ((lit (lhs (car T)))
-               (big (rhs (car T))))
-           (cond
-             ((or (subsumed-T? lit big (cdr T))
-                  (subsumed-T? lit big T^))
-              (rem-subsumed (cdr T) T^))
-             (else (rem-subsumed (cdr T)
-                     (cons (car T) T^))))))))))
-
-(define subsumed-T?
-  (lambda (lit big T)
-    (cond
-      ((null? T) #f)
-      (else
-       (let ((lit^ (lhs (car T)))
-             (big^ (rhs (car T))))
-         (or
-           (and (eq? big big^) (member* lit^ lit))
-           (subsumed-T? lit big (cdr T))))))))
-
-(define LOF
-  (lambda ()
-    `(
-      ,drop-D-b/c-Y-or-N
-      ,move-T-to-D-b/c-t2-atom
-      ,drop-from-D-b/c-T
-      ,drop-t-b/c-t2-occurs-t1
-      )))
 
