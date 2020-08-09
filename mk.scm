@@ -129,7 +129,7 @@
 ; Describes the constraints attached to a single variable.
 ;
 ; Contains:
-;   T - type constraint. 'symbolo 'numbero or #f to indicate
+;   T - type constraint. instance of type-constraint or #f to indicate
 ;         no constraint
 ;   D - list of disequality constraints. Each disequality is a list of
 ;         associations. The constraint is violated if all associated
@@ -421,24 +421,36 @@
 ; 2. Each type must have infinitely many possible values to avoid
 ;      incorrectness in combination with disequality constraints,
 ;      like: (fresh (x) (booleano x) (=/= x #t) (=/= x #f))
-(define type-constraint
-  (lambda (type-pred type-id)
-    (lambda (u)
-      (lambdag@ (st)
+
+(define (type-constraint predicate symbol)
+  (cons predicate symbol))
+(define type-constraint-predicate car)
+(define type-constraint-symbol cdr)
+
+(define (apply-type-constraint tc)
+  (lambda (u)
+    (lambdag@ (st)
+      (let ([type-pred (type-constraint-predicate tc)]
+            [type-id (type-constraint-symbol tc)])
         (let ((term (walk u (state-S st))))
           (cond
             ((type-pred term) st)
             ((var? term)
              (let* ((c (lookup-c term st))
-                   (T (c-T c)))
+                    (T (c-T c)))
                (cond
-                 ((eq? T type-id) st)
-                 ((not T) (set-c term (c-with-T c type-id) st))
+                 ((eq? T tc) st)
+                 ((not T) (set-c term (c-with-T c tc) st))
                  (else #f))))
             (else #f)))))))
 
-(define symbolo (type-constraint symbol? 'symbolo))
-(define numbero (type-constraint number? 'numbero))
+(define symbolo (apply-type-constraint (type-constraint symbol? 'symbolo)))
+(define numbero (apply-type-constraint (type-constraint number? 'numbero)))
+
+; Options:
+;   table mapping symbol -> predicate
+;   representation of type constraint as pair or struct of symbol and predicate
+;   store both
 
 (define (add-to-D st v d)
   (let* ((c (lookup-c v st))
@@ -521,11 +533,8 @@
         (let ((st (remove-c (lhs a) st)))
          (and-foldl (lambda (op st) (op st)) st
           (append
-            (if (eq? (c-T old-c) 'symbolo)
-              (list (symbolo (rhs a)))
-              '())
-            (if (eq? (c-T old-c) 'numbero)
-              (list (numbero (rhs a)))
+            (if (c-T old-c)
+              (list ((apply-type-constraint (c-T old-c)) (rhs a)))
               '())
             (map (lambda (atom) (absento atom (rhs a))) (c-A old-c))
             (map (lambda (d) (=/=* d)) (c-D old-c)))))))))
@@ -578,10 +587,10 @@
                   (A^ (c-A c)))
               `(,S
                  ,(append D^ D)
-                 ,(if (eq? T^ 'symbolo)
+                 ,(if (and T^ (eq? (type-constraint-symbol T^) 'symbolo))
                     (cons v Y)
                     Y)
-                 ,(if (eq? T^ 'numbero)
+                 ,(if (and T^ (eq? (type-constraint-symbol T^) 'numbero))
                     (cons v N)
                     N)
                  ,(append
@@ -1039,6 +1048,8 @@
               (and S+ (null? added))
               (subsumed? d (cdr d*)))))))))
 
+; if in a disequality constraint, one of the pairs is the same var
+; on left and right hand side
 (define rem-xx-from-d
   (lambdar@ (c : S D Y N T)
     (let ((D (walk* D S)))
