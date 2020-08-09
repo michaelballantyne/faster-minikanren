@@ -571,29 +571,25 @@
 ; N - numbero
 ; T - absento
 
-(define c->S (lambda (c) (car c)))
-(define c->D (lambda (c) (cadr c)))
-(define c->Y (lambda (c) (caddr c)))
-(define c->N (lambda (c) (cadddr c)))
-(define c->T (lambda (c) (cadddr (cdr c))))
+(define (oldc S D Y N T)
+  (list S D Y N T))
 
-; Syntax for reification goal objects using the old constraint store
-(define-syntax lambdar@
-  (syntax-rules (:)
-    ((_ (c) e) (lambda (c) e))
-    ((_ (c : S D Y N T) e)
-     (lambda (c)
-       (let ((S (c->S c))
-             (D (c->D c))
-             (Y (c->Y c))
-             (N (c->N c))
-             (T (c->T c)))
-         e)))))
+(define oldc-S (lambda (c) (car c)))
+(define oldc-D (lambda (c) (cadr c)))
+(define oldc-Y (lambda (c) (caddr c)))
+(define oldc-N (lambda (c) (cadddr c)))
+(define oldc-T (lambda (c) (cadddr (cdr c))))
 
-(define-syntax letr@
-  (syntax-rules ()
-    [(_ [(S D Y N T) e] b)
-     ((lambdar@ (c : S D Y N T) b) e)]))
+(define (oldc-with-S c S^)
+  (oldc S^ (oldc-D c) (oldc-Y c) (oldc-N c) (oldc-T c)))
+(define (oldc-with-D c D^)
+  (oldc (oldc-S c) D^ (oldc-Y c) (oldc-N c) (oldc-T c)))
+(define (oldc-with-Y c Y^)
+  (oldc (oldc-S c) (oldc-D c) Y^ (oldc-N c) (oldc-T c)))
+(define (oldc-with-N c N^)
+  (oldc (oldc-S c) (oldc-D c) (oldc-Y c) N^ (oldc-T c)))
+(define (oldc-with-T c T^)
+  (oldc (oldc-S c) (oldc-D c) (oldc-Y c) (oldc-N c) T^))
 
 ; Create a constraint store of the old representation from a state
 ; object, so that we can use the old reifier. Only accumulates
@@ -603,23 +599,23 @@
   (let ((vs (vars (walk* x (state-S st)) '())))
     (foldl
       (lambda (v c-store)
-        (letr@ [(S D Y N T) c-store]
-          (let ((c (lookup-c v st)))
-            (let ((T^ (c-T c))
-                  (D^ (c-D c))
-                  (A^ (c-A c)))
-              `(,S
-                 ,(append D^ D)
-                 ,(if (and (c-T c) (eq? (type-constraint-symbol (c-T c)) 'symbolo))
-                    (cons v Y)
-                    Y)
-                 ,(if (and (c-T c) (eq? (type-constraint-symbol (c-T c)) 'numbero))
-                    (cons v N)
-                    N)
-                 ,(append
-                    (map (lambda (absento-lhs) (cons absento-lhs v)) (c-A c))
-                    T))))))
-      `(,(state-S st) () () () ())
+        (let ((c (lookup-c v st)))
+          (let ((T^ (c-T c))
+                (D^ (c-D c))
+                (A^ (c-A c)))
+            (oldc
+              (oldc-S c-store)
+              (append D^ (oldc-D c-store))
+              (if (and (c-T c) (eq? (type-constraint-symbol (c-T c)) 'symbolo))
+                (cons v (oldc-Y c-store))
+                (oldc-Y c-store))
+              (if (and (c-T c) (eq? (type-constraint-symbol (c-T c)) 'numbero))
+                (cons v (oldc-N c-store))
+                (oldc-N c-store))
+              (append
+                (map (lambda (absento-lhs) (cons absento-lhs v)) (c-A c))
+                (oldc-T c-store))))))
+      (oldc (state-S st) '() '() '() '())
       (remove-duplicates vs))))
 
 (define (vars term acc)
@@ -634,11 +630,11 @@
 (define (reify x)
   (lambda (st)
     (let* ((c (fixed-point-simplify (c-from-st st x)))
-           (S (c->S c)))
-      (let ((D (walk* (c->D c) S))
-            (Y (walk* (c->Y c) S))
-            (N (walk* (c->N c) S))
-            (T (walk* (c->T c) S)))
+           (S (oldc-S c)))
+      (let ((D (walk* (oldc-D c) S))
+            (Y (walk* (oldc-Y c) S))
+            (N (walk* (oldc-N c) S))
+            (T (walk* (oldc-T c) S)))
         (let* ((v (walk* x S))
                (R (reify-S v (subst empty-subst-map nonlocal-scope)))
                (any-var-unreified? (lambda (term) (anyvar? term R))))
@@ -676,41 +672,38 @@
 ; either due to type constraints or ground values.
 ; Examples:
 ;  * given (symbolo x) and (numbero y), (=/= x y) is dropped.
-(define drop-D-b/c-Y-or-N
-  (lambdar@ (c : S D Y N T)
-    (let-values (((conflicted D^)
-                  (partition
-                    (lambda (d)
-                      (exists (lambda (pr)
-                                (term-ununifiable? S Y N (lhs pr) (rhs pr)))
-                              d))
-                    D)))
-      (if (not (null? conflicted))
-        `(,S ,D^ ,Y ,N ,T)
-        c))))
+(define (drop-D-b/c-Y-or-N c)
+  (let-values (((conflicted D^)
+                (partition
+                  (lambda (d)
+                    (exists (lambda (pr)
+                              (term-ununifiable? c (lhs pr) (rhs pr)))
+                            d))
+                  (oldc-D c))))
+              (if (not (null? conflicted))
+                (oldc-with-D c D^)
+                c)))
 
-(define term-ununifiable?
-  (lambda (S Y N t1 t2)
-    (let ((t1^ (walk t1 S))
-          (t2^ (walk t2 S)))
-      (cond
-        ((or (untyped-var? S Y N t1^) (untyped-var? S Y N t2^)) #f)
-        ((var? t1^) (var-type-mismatch? S Y N t1^ t2^))
-        ((var? t2^) (var-type-mismatch? S Y N t2^ t1^))
-        (else (error 'term-ununifiable? "invariant violation"))))))
+(define (term-ununifiable? c t1 t2)
+  (let ((t1^ (walk t1 (oldc-S c)))
+        (t2^ (walk t2 (oldc-S c))))
+    (cond
+      ((or (untyped-var? c t1^) (untyped-var? c t2^)) #f)
+      ((var? t1^) (var-type-mismatch? c t1^ t2^))
+      ((var? t2^) (var-type-mismatch? c t2^ t1^))
+      (else (error 'term-ununifiable? "invariant violation")))))
 
-(define untyped-var?
-  (lambda (S Y N t^)
-    (let ((in-type? (lambda (y) (var-eq? (walk y S) t^))))
-      (and (var? t^)
-           (not (exists in-type? Y))
-           (not (exists in-type? N))))))
+(define (untyped-var? c t^)
+  (let ((in-type? (lambda (y) (var-eq? (walk y (oldc-S c)) t^))))
+    (and (var? t^)
+         (not (exists in-type? (oldc-Y c)))
+         (not (exists in-type? (oldc-N c))))))
 
 (define var-type-mismatch?
-  (lambda (S Y N t1^ t2^)
+  (lambda (c t1^ t2^)
     (cond
-      ((num? S N t1^) (not (num? S N t2^)))
-      ((sym? S Y t1^) (not (sym? S Y t2^)))
+      ((num? (oldc-S c) (oldc-N c) t1^) (not (num? (oldc-S c) (oldc-N c) t2^)))
+      ((sym? (oldc-S c) (oldc-Y c) t1^) (not (sym? (oldc-S c) (oldc-Y c) t2^)))
       (else #f))))
 
 (define num?
@@ -733,53 +726,52 @@
 (define (absento->diseq t)
   (list t))
 
-(define move-T-to-D-b/c-t2-atom
-  (lambdar@ (c : S D Y N T)
-    (let-values (((to-move T^)
-                  (partition
-                    (lambda (t)
-                      (let ((t-rhs^ (walk (rhs t) S)))
-                        (and (not (untyped-var? S Y N t-rhs^))
-                             (not (pair? t-rhs^)))))
-                    T)))
-      (if (not (null? to-move))
-        (let ((D^ (append (map absento->diseq to-move) D)))
-          `(,S ,D^ ,Y ,N ,T^))
-        c))))
+(define (move-T-to-D-b/c-t2-atom c)
+  (let-values (((to-move T^)
+                (partition
+                  (lambda (t)
+                    (let ((t-rhs^ (walk (rhs t) (oldc-S c))))
+                      (and (not (untyped-var? c t-rhs^))
+                           (not (pair? t-rhs^)))))
+                  (oldc-T c))))
+    (if (not (null? to-move))
+        (let ((D^ (append (map absento->diseq to-move) (oldc-D c))))
+          (oldc-with-T
+            (oldc-with-D c D^)
+            T^))
+        c)))
 
 ; Drop disequalities that are subsumed by an absento contraint,
 ; interpreted as a disequality.
-(define drop-from-D-b/c-T
-  (lambdar@ (c : S D Y N T)
-    (let-values (((subsumed D^)
-                  (partition
-                    (lambda (d)
-                      (exists
-                        (lambda (t)
-                          (d-subsumed-by? d (absento->diseq t)))
-                        T))
-                    D)))
-     (if (not (null? subsumed))
-       `(,S ,D^ ,Y ,N ,T)
-       c))))
+(define (drop-from-D-b/c-T c)
+  (let-values (((subsumed D^)
+                (partition
+                  (lambda (d)
+                    (exists
+                      (lambda (t)
+                        (d-subsumed-by? d (absento->diseq t)))
+                      (oldc-T c)))
+                  (oldc-D c))))
+    (if (not (null? subsumed))
+      (oldc-with-D c D^)
+      c)))
 
 ; Drop absento constraints that are trivially satisfied because
 ; any violation would cause a failure of the occurs check.
 ; Example:
 ;  (absento (list x y z) x) is trivially true because a violation would
 ;  require x to occur within itself.
-(define drop-t-b/c-t2-occurs-t1
-  (lambdar@ (c : S D Y N T)
-    (let-values (((to-drop T^)
-                  (partition
-                    (lambda (t)
-                      (let ((t-lhs^ (walk (lhs t) S))
-                            (t-rhs^ (walk (rhs t) S)))
-                        (occurs-check t-rhs^ t-lhs^ S)))
-                    T)))
-     (if (not (null? to-drop))
-       `(,S ,D ,Y ,N ,T^)
-       c))))
+(define (drop-t-b/c-t2-occurs-t1 c)
+  (let-values (((to-drop T^)
+                (partition
+                  (lambda (t)
+                    (let ((t-lhs^ (walk (lhs t) (oldc-S c)))
+                          (t-rhs^ (walk (rhs t) (oldc-S c))))
+                      (occurs-check t-rhs^ t-lhs^ (oldc-S c))))
+                  (oldc-T c))))
+    (if (not (null? to-drop))
+      (oldc-with-T c T^)
+      c)))
 
 (define anyvar?
   (lambda (u r)
