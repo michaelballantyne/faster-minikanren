@@ -539,9 +539,6 @@
             (map (lambda (atom) (absento atom (rhs a))) (c-A old-c))
             (map (lambda (d) (=/=* d)) (c-D old-c)))))))))
 
-
-; Reification
-
 (define walk*
   (lambda (v S)
     (let ((v (walk v S)))
@@ -551,14 +548,6 @@
          (cons (walk* (car v) S) (walk* (cdr v) S)))
         (else v)))))
 
-(define vars
-  (lambda (term acc)
-    (cond
-      ((var? term) (cons term acc))
-      ((pair? term)
-       (vars (cdr term) (vars (car term) acc)))
-      (else acc))))
-
 (define-syntax project
   (syntax-rules ()
     ((_ (x ...) g g* ...)
@@ -566,38 +555,44 @@
        (let ((x (walk* x (state-S st))) ...)
          ((fresh () g g* ...) st))))))
 
+(define succeed (== #f #f))
+(define fail (== #f #t))
+
+; Reification
+
+(define (vars term acc)
+  (cond
+    ((var? term) (cons term acc))
+    ((pair? term)
+     (vars (cdr term) (vars (car term) acc)))
+    (else acc)))
 
 ; Create a constraint store of the old representation from a state
 ; object, so that we can use the old reifier. Only accumulates
 ; constraints related to the variable being reified which makes things
 ; a bit faster.
-(define c-from-st
-  (lambda (st x)
-    (let ((vs (vars (walk* x (state-S st)) '())))
-      (foldl
-        (lambda (v c-store)
+(define (c-from-st st x)
+  (let ((vs (vars (walk* x (state-S st)) '())))
+    (foldl
+      (lambda (v c-store)
+        (letr@ [(S D Y N T) c-store]
           (let ((c (lookup-c v st)))
-            (let ((S (state-S st))
-                  (D (c->D c-store))
-                  (Y (c->Y c-store))
-                  (N (c->N c-store))
-                  (T (c->T c-store))
-                  (T^ (c-T c))
+            (let ((T^ (c-T c))
                   (D^ (c-D c))
                   (A^ (c-A c)))
               `(,S
                  ,(append D^ D)
-                 ,(if (and T^ (eq? (type-constraint-symbol T^) 'symbolo))
+                 ,(if (and (c-T c) (eq? (type-constraint-symbol (c-T c)) 'symbolo))
                     (cons v Y)
                     Y)
-                 ,(if (and T^ (eq? (type-constraint-symbol T^) 'numbero))
+                 ,(if (and (c-T c) (eq? (type-constraint-symbol (c-T c)) 'numbero))
                     (cons v N)
                     N)
                  ,(append
-                    (map (lambda (atom) (cons atom v)) A^)
-                    T)))))
-        `(,(state-S st) () () () ())
-        (remove-duplicates vs)))))
+                    (map (lambda (absento-lhs) (cons absento-lhs v)) (c-A c))
+                    T))))))
+      `(,(state-S st) () () () ())
+      (remove-duplicates vs))))
 
 (define reify
   (lambda (x)
@@ -612,21 +607,18 @@
             (let ((v (walk* x S)))
               (let ((R (reify-S v (subst empty-subst-map
                                          nonlocal-scope))))
-                (reify+ v R
-                        (let ((D (remp
-                                   (lambda (d)
-                                     (let ((dw (walk* d S)))
-                                       (anyvar? dw R)))
-                                   (rem-xx-from-d c))))
-                          (rem-subsumed-ds D))
-                        (remp
-                          (lambda (y) (var? (walk y R)))
-                          Y)
-                        (remp
-                          (lambda (n) (var? (walk n R)))
-                          N)
-                        (remp (lambda (t)
-                                (anyvar? t R)) T))))))))))
+                (let ([any-var-unreified? (lambda (term) (anyvar? term R))])
+                  (reify+ v R
+                          ; Drop disequalities that are satisfiable in any
+                          ; assignment of the reified variables, because
+                          ; they refer to unassigned variables that are not
+                          ; part of the answer, which can be assigned as needed
+                          ; to satisfy the constraint.
+                          (let ((D (remp any-var-unreified? D)))
+                            (rem-subsumed-ds D))
+                          (remp any-var-unreified? Y)
+                          (remp any-var-unreified? N)
+                          (remp any-var-unreified? T)))))))))))
 
 
 ; Bits from the old constraint implementation, still used for
@@ -658,6 +650,11 @@
              (N (c->N c))
              (T (c->T c)))
          e)))))
+
+(define-syntax letr@
+  (syntax-rules ()
+    [(_ [(S D Y N T) e] b)
+     ((lambdar@ (c : S D Y N T) b) e)]))
 
 (define tagged?
   (lambda (S Y y^)
@@ -818,8 +815,11 @@
          (lambda (d) `(,S ,(remq1 d D) ,Y ,N ,T)))
       (else c))))
 
-;; (list x y z) must be absent from x
-;; (absento (list x y z) x)
+; Drop absento constraints that are trivially satisfied because
+; any violation would cause a failure of the occurs check.
+; Example:
+;  (absento (list x y z) x) is trivially true because a violation would
+;  require x to occur within itself.
 (define drop-t-b/c-t2-occurs-t1
   (lambdar@ (c : S D Y N T)
     (cond
@@ -836,11 +836,11 @@
   (lambda (S Y N)
     (lambda (D)
       (find
-       (lambda (d)
-	 (exists (lambda (pr)
-		   (term-ununifiable? S Y N (lhs pr) (rhs pr)))
-		 d))
-       D))))
+        (lambda (d)
+          (exists (lambda (pr)
+                    (term-ununifiable? S Y N (lhs pr) (rhs pr)))
+                  d))
+        D))))
 
 ;; (run 1 (x y) (symbolo x) (numbero y) (=/= x y))
 ;; (run 1 (x y) (=/= x y) (symbolo x) (numbero y))
@@ -897,44 +897,6 @@
 (define ground-non-number?
   (ground-non-<type>? number?))
 
-(define succeed (== #f #f))
-
-(define fail (== #f #t))
-
-(define ==fail-check
-  (lambda (S0 D Y N T)
-    (let ([S0 (subst-with-scope S0 nonlocal-scope)])
-      (cond
-        ((atomic-fail-check S0 Y ground-non-symbol?) #t)
-        ((atomic-fail-check S0 N ground-non-number?) #t)
-        ((symbolo-numbero-fail-check S0 Y N) #t)
-        ((=/=-fail-check S0 D) #t)
-        ((absento-fail-check S0 T) #t)
-        (else #f)))))
-
-(define atomic-fail-check
-  (lambda (S A pred)
-    (exists (lambda (a) (pred (walk a S) S)) A)))
-
-(define symbolo-numbero-fail-check
-  (lambda (S A N)
-    (let ((N (map (lambda (n) (walk n S)) N)))
-      (exists (lambda (a) (exists (same-var? (walk a S)) N))
-        A))))
-
-(define absento-fail-check
-  (lambda (S T)
-    (exists (lambda (t) (mem-check (lhs t) (rhs t) S)) T)))
-
-(define =/=-fail-check
-  (lambda (S D)
-    (exists (d-fail-check S) D)))
-
-(define d-fail-check
-  (lambda (S)
-    (lambda (d)
-      (let-values (((S added) (unify* d S)))
-        (and S (null? added))))))
 
 (define reify+
   (lambda (v R D Y N T)
@@ -1022,26 +984,6 @@
 
 (define (subsumed-by-one-of? d d*)
   (ormap (lambda (el) (subsumed-by? d el)) d*))
-
-
-; Remove disequality constraints that are fully satisfied because
-; other constraints would fail if the arguments were unified.
-;
-; Examples:
-; * Given (absento 'a x), then (== x 'a) fails, so (=/= x 'a) is fully satisfied.
-; * Given (absento a b), then (== a b) simplifies the constraint to
-;    (absento b b) which fails, so (=/= a d) is fully satisfied.
-; * Given (symbolo a) and (numbero b), (== a b) fails so (=/= a b) is fully satisfied
-(define rem-xx-from-d
-  (lambdar@ (c : S D Y N T)
-    (let ((D (walk* D S)))
-      (define (should-keep-d? d)
-         (let-values (((S0 ignore) (unify* d S)))
-            (not (==fail-check S0 '() Y N T))))
-      (filter should-keep-d? D))))
-
-; (=/= x y) (=/= y x) ; can drop one of
-; (absento x y) (absento y x) ; can only drop one if one side is known atomic
 
 (define rem-subsumed-T
   (lambda (T)
