@@ -19,7 +19,6 @@
 
 (define scope-eq? eq?)
 
-
 ; Logic variable object.
 ; Contains:
 ;   val - value for variable assigned by unification using
@@ -482,7 +481,7 @@
                 (cond
                   ((pair? term2)
                    (let ((st^ ((absento term1 (car term2)) st)))
-                     (and st^ ((absento term1 (cdr term2)) st^))))            
+                     (and st^ ((absento term1 (cdr term2)) st^))))
                   ((var? term2)
                    (let* ((c (lookup-c term2 st))
                           (A (c-A c)))
@@ -717,24 +716,6 @@
        (or (member* u (car v)) (member* u (cdr v))))
       (else #f))))
 
-(define drop-N-b/c-const
-  (lambdar@ (c : S D Y N T)
-    (let ((const? (lambda (n)
-                    (not (var? (walk n S))))))
-      (cond
-        ((find const? N) =>
-           (lambda (n) `(,S ,D ,Y ,(remq1 n N) ,T)))
-        (else c)))))
-
-(define drop-Y-b/c-const
-  (lambdar@ (c : S D Y N T)
-    (let ((const? (lambda (y)
-                    (not (var? (walk y S))))))
-      (cond
-        ((find const? Y) =>
-           (lambda (y) `(,S ,D ,(remq1 y Y) ,N ,T)))
-        (else c)))))
-
 (define remq1
   (lambda (elem ls)
     (cond
@@ -763,21 +744,6 @@
                   elem)
                  (else (loop (cdr set^))))))))))))
 
-(define drop-N-b/c-dup-var
-  (lambdar@ (c : S D Y N T)
-    (cond
-      (((find-dup same-var? S) N) =>
-       (lambda (n) `(,S ,D ,Y ,(remq1 n N) ,T)))
-      (else c))))
-
-(define drop-Y-b/c-dup-var
-  (lambdar@ (c : S D Y N T)
-    (cond
-      (((find-dup same-var? S) Y) =>
-       (lambda (y)
-         `(,S ,D ,(remq1 y Y) ,N ,T)))
-      (else c))))
-
 (define var-type-mismatch?
   (lambda (S Y N t1^ t2^)
     (cond
@@ -798,22 +764,6 @@
              (term-ununifiable? S Y N (cdr t1^) (cdr t2^))))
         (else (not (eqv? t1^ t2^)))))))
 
-(define T-term-ununifiable?
-  (lambda (S Y N)
-    (lambda (t1)
-      (let ((t1^ (walk t1 S)))
-        (letrec
-            ((t2-check
-              (lambda (t2)
-                (let ((t2^ (walk t2 S)))
-                  (if (pair? t2^)
-                    (and
-                       (term-ununifiable? S Y N t1^ t2^)
-                       (t2-check (car t2^))
-                       (t2-check (cdr t2^)))
-                    (term-ununifiable? S Y N t1^ t2^))))))
-          t2-check)))))
-
 (define num?
   (lambda (S N n)
     (let ((n (walk n S)))
@@ -828,13 +778,7 @@
         ((var? y) (tagged? S Y y))
         (else (symbol? y))))))
 
-(define drop-T-b/c-Y-and-N
-  (lambdar@ (c : S D Y N T)
-    (let ((drop-t? (T-term-ununifiable? S Y N)))
-      (cond
-        ((find (lambda (t) ((drop-t? (lhs t)) (rhs t))) T) =>
-         (lambda (t) `(,S ,D ,Y ,N ,(remq1 t T))))
-        (else c)))))
+
 
 (define move-T-to-D-b/c-t2-atom
   (lambdar@ (c : S D Y N T)
@@ -893,6 +837,8 @@
          (lambda (d) `(,S ,(remq1 d D) ,Y ,N ,T)))
       (else c))))
 
+;; (list x y z) must be absent from x
+;; (absento (list x y z) x)
 (define drop-t-b/c-t2-occurs-t1
   (lambdar@ (c : S D Y N T)
     (cond
@@ -905,21 +851,6 @@
                `(,S ,D ,Y ,N ,(remq1 t T))))
       (else c))))
 
-(define split-t-move-to-d-b/c-pair
-  (lambdar@ (c : S D Y N T)
-    (cond
-      ((exists
-         (lambda (t)
-           (let ((t2^ (walk (rhs t) S)))
-             (cond
-               ((pair? t2^) (let ((ta `(,(lhs t) . ,(car t2^)))
-                                  (td `(,(lhs t) . ,(cdr t2^))))
-                              (let ((T `(,ta ,td . ,(remq1 t T))))
-                                `(,S ((,t) . ,D) ,Y ,N ,T))))
-               (else #f))))
-         T))
-      (else c))))
-
 (define find-d-conflict
   (lambda (S Y N)
     (lambda (D)
@@ -930,6 +861,8 @@
 		 d))
        D))))
 
+;; (run 1 (x y) (symbolo x) (numbero y) (=/= x y))
+;; (run 1 (x y) (=/= x y) (symbolo x) (numbero y))
 (define drop-D-b/c-Y-or-N
   (lambdar@ (c : S D Y N T)
     (cond
@@ -1106,8 +1039,6 @@
               (and S+ (null? added))
               (subsumed? d (cdr d*)))))))))
 
-
-
 (define rem-xx-from-d
   (lambdar@ (c : S D Y N T)
     (let ((D (walk* D S)))
@@ -1153,8 +1084,10 @@
 
 (define LOF
   (lambda ()
-    `(,drop-N-b/c-const ,drop-Y-b/c-const ,drop-Y-b/c-dup-var
-      ,drop-N-b/c-dup-var ,drop-D-b/c-Y-or-N ,drop-T-b/c-Y-and-N
-      ,move-T-to-D-b/c-t2-atom ,split-t-move-to-d-b/c-pair
-      ,drop-from-D-b/c-T ,drop-t-b/c-t2-occurs-t1)))
+    `(
+      ,drop-D-b/c-Y-or-N
+      ,move-T-to-D-b/c-t2-atom
+      ,drop-from-D-b/c-T
+      ,drop-t-b/c-t2-occurs-t1
+      )))
 
