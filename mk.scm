@@ -618,7 +618,7 @@
                                      (let ((dw (walk* d S)))
                                        (anyvar? dw R)))
                                    (rem-xx-from-d c))))
-                          (rem-subsumed D))
+                          (rem-subsumed-ds D))
                         (remp
                           (lambda (y) (var? (walk y R)))
                           Y)
@@ -803,45 +803,17 @@
              T))
       (else c))))
 
-(define terms-pairwise=?
-  (lambda (pr-a^ pr-d^ t-a^ t-d^ S)
-    (or
-     (and (term=? pr-a^ t-a^ S)
-          (term=? pr-d^ t-a^ S))
-     (and (term=? pr-a^ t-d^ S)
-          (term=? pr-d^ t-a^ S)))))
-
-(define T-superfluous-pr?
-  (lambda (S Y N T)
-    (lambda (pr)
-      (let ((pr-a^ (walk (lhs pr) S))
-            (pr-d^ (walk (rhs pr) S)))
-        (cond
-          ((exists
-               (lambda (t)
-                 (let ((t-a^ (walk (lhs t) S))
-                       (t-d^ (walk (rhs t) S)))
-                   (terms-pairwise=? pr-a^ pr-d^ t-a^ t-d^ S)))
-             T)
-           (for-all
-            (lambda (t)
-              (let ((t-a^ (walk (lhs t) S))
-                    (t-d^ (walk (rhs t) S)))
-                (or
-                 (not (terms-pairwise=? pr-a^ pr-d^ t-a^ t-d^ S))
-                 (untyped-var? S Y N t-d^)
-                 (pair? t-d^))))
-            T))
-          (else #f))))))
-
+; Drop disequalities that are subsumed by an absento contraint,
+; interpreted as a disequality.
 (define drop-from-D-b/c-T
   (lambdar@ (c : S D Y N T)
     (cond
       ((find
            (lambda (d)
              (exists
-                 (T-superfluous-pr? S Y N T)
-               d))
+               (lambda (t)
+                 (subsumed-by? d (list t)))
+               T))
          D) =>
          (lambda (d) `(,S ,(remq1 d D) ,Y ,N ,T)))
       (else c))))
@@ -1024,48 +996,52 @@
         ((lex<=? r l) `(,r . ,l))
         (else pr)))))
 
-(define rem-subsumed
-  (lambda (D)
-    (let rem-subsumed ((D D) (d^* '()))
-      (cond
-        ((null? D) d^*)
-        ((or (subsumed? (car D) (cdr D))
-             (subsumed? (car D) d^*))
-         (rem-subsumed (cdr D) d^*))
-        (else (rem-subsumed (cdr D)
-                (cons (car D) d^*)))))))
-
-(define subsumed?
-  (lambda (d d*)
+; Given a list of non-falsified disequalities, drops elements to produce a
+; result where no disequality subsumes another.
+(define (rem-subsumed-ds D)
+  (let loop ((D D)
+             (result '()))
     (cond
-      ((null? d*) #f)
-      (else
-        (let-values (((S ignore) (unify* d (subst
-                                             empty-subst-map
-                                             nonlocal-scope))))
-          (let-values (((S+ added) (unify* (car d*) S)))
-            (or
-              (and S+ (null? added))
-              (subsumed? d (cdr d*)))))))))
+      ((null? D) result)
+      ((or (subsumed-by-one-of? (car D) (cdr D))
+           (subsumed-by-one-of? (car D) result))
+       (loop (cdr D) result))
+      (else (loop (cdr D)
+                  (cons (car D) result))))))
 
-; if in a disequality constraint, one of the pairs is the same var
-; on left and right hand side
+; (-> disequality/c disequality/c boolean?)
+; Examples:
+;  d1: ((a . 5) (b . 6))
+;  d2: ((a . 5))
+;  -> #t  because (not (== a 5)) is a stronger constraint than
+;                 (not (and (== a 5) (== b 6)))
+(define (subsumed-by? d1 d2)
+  (let*-values (((S ignore) (unify* d1 (subst empty-subst-map nonlocal-scope)))
+                ((S+ added) (unify* d2 S)))
+               (and S+ (null? added))))
+
+(define (subsumed-by-one-of? d d*)
+  (ormap (lambda (el) (subsumed-by? d el)) d*))
+
+
+; Remove disequality constraints that are fully satisfied because
+; other constraints would fail if the arguments were unified.
+;
+; Examples:
+; * Given (absento 'a x), then (== x 'a) fails, so (=/= x 'a) is fully satisfied.
+; * Given (absento a b), then (== a b) simplifies the constraint to
+;    (absento b b) which fails, so (=/= a d) is fully satisfied.
+; * Given (symbolo a) and (numbero b), (== a b) fails so (=/= a b) is fully satisfied
 (define rem-xx-from-d
   (lambdar@ (c : S D Y N T)
     (let ((D (walk* D S)))
-      (remp not
-            (map (lambda (d)
-                   (let-values (((S0 ignore) (unify* d S)))
-                     (cond
-                       ((not S0) #f)
-                       ((==fail-check S0 '() Y N T) #f)
-                       (else
-                         (let-values
-                           (((S added)
-                             (unify* d (subst empty-subst-map
-                                              nonlocal-scope))))
-                           added)))))
-                 D)))))
+      (define (should-keep-d? d)
+         (let-values (((S0 ignore) (unify* d S)))
+            (not (==fail-check S0 '() Y N T))))
+      (filter should-keep-d? D))))
+
+; (=/= x y) (=/= y x) ; can drop one of
+; (absento x y) (absento y x) ; can only drop one if one side is known atomic
 
 (define rem-subsumed-T
   (lambda (T)
