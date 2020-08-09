@@ -653,3 +653,22 @@
       (=/= a b)
       (== `(,a ,b) q)))
   '(((_.0 _.1) (absento (_.0 _.1)))))
+
+(test "test 86 absento-occurs-check"
+   (run* (q) 
+     (fresh (x y z)
+       (== (list x y z) q)
+       (absento (list x y z) x)))
+   '((_.0 _.1 _.2)))
+
+(test "test 87 absento-symbolo-numbero-together-drop-superfluous"
+   (run* (q) 
+     (fresh (x y z)
+       (== (list x y z) q)
+       (absento x (cons y z))
+       (symbolo x)
+       (numbero y)))
+   '(((_.0 _.1 _.2) (num _.1) (sym _.0) (absento (_.0 _.2))))
+   )
+
+ 
