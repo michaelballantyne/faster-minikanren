@@ -644,20 +644,12 @@
                 (A^ (c-A c)))
             (oldc
               (oldc-S c-store)
-              (append D^ (oldc-D c-store))
+              (append (walk* D^ (state-S st)) (oldc-D c-store))
               (if (c-T c)
-                (begin
-                  ;(display "extending:\n")
-                  ;(display v)
-                  ;(display "\n")
-                  ;(display (c-T c))
-                  ;(display "\n")
-                  ;(display (subst-map-add (oldc-T c-store) v (c-T c)))
-                  ;(display "\n")
-                  (subst-map-add (oldc-T c-store) v (c-T c)))
+                (subst-map-add (oldc-T c-store) v (c-T c))
                 (oldc-T c-store))
               (append
-                (map (lambda (absento-lhs) (cons absento-lhs v)) (c-A c))
+                (map (lambda (absento-lhs) (cons (walk* absento-lhs (state-S st)) v)) (c-A c))
                 (oldc-A c-store))))))
       (oldc (state-S st) '() empty-subst-map '())
       (remove-duplicates vs))))
@@ -673,15 +665,9 @@
 
 (define (reify x)
   (lambda (st)
-
     (let* ((c (c-from-st st x))
-           ;(_1 (begin
-                 ;(display "before simplify:\n")
-                 ;(display (oldc-T c))))
-           (c (fixed-point-simplify c))
+           (c (simplify c))
            (S (oldc-S c)))
-      (let ((D (walk* (oldc-D c) S))
-            (A (walk* (oldc-A c) S)))
         (let* ((v (walk* x S))
                (R (reify-S v (subst empty-subst-map nonlocal-scope)))
                (any-var-unreified? (lambda (term) (anyvar? term R))))
@@ -691,34 +677,25 @@
                   ; they refer to unassigned variables that are not
                   ; part of the answer, which can be assigned as needed
                   ; to satisfy the constraint.
-                  (let ((D^ (remp any-var-unreified? D)))
+                  (let ((D^ (remp any-var-unreified? (oldc-D c))))
                     (rem-subsumed d-subsumed-by? D^))
                   (oldc-T c) ; maybe need to remove unreified?
-                  (let ((A^ (remp any-var-unreified? A)))
-                    (rem-subsumed t-subsumed-by? A^))))))))
+                  (let ((A^ (remp any-var-unreified? (oldc-A c))))
+                    (rem-subsumed t-subsumed-by? A^)))))))
 
-(define (fixed-point-simplify c)
-  (define (apply-all-simplifications c)
-    (foldl app1 c
-           (list drop-D-b/c-T
-                 move-A-to-D-b/c-a-rhs-atom
-                 drop-from-D-b/c-A
-                 drop-a-b/c-a-rhs-occurs-a-lhs)))
-  (fixed-point apply-all-simplifications c))
-
-(define (app1 f c) (f c))
-
-(define (fixed-point f arg)
-  (let ((r (f arg)))
-    (if (eq? r arg)
-      r
-      (fixed-point f r))))
+(define (simplify c)
+  (foldl (lambda (f c) (f c)) c
+         (list
+           drop-a-because-rhs-atom
+           drop-d-because-T
+           drop-d-because-A
+           drop-a-because-rhs-occurs-lhs)))
 
 ; Drops disequalities that are fully satisfied because the types are disjoint
 ; either due to type constraints or ground values.
 ; Examples:
 ;  * given (symbolo x) and (numbero y), (=/= x y) is dropped.
-(define (drop-D-b/c-T c)
+(define (drop-d-because-T c)
   (let-values (((conflicted D^)
                 (partition
                   (lambda (d)
@@ -731,13 +708,11 @@
                 c)))
 
 (define (term-ununifiable? c t1 t2)
-  (let ((t1^ (walk t1 (oldc-S c)))
-        (t2^ (walk t2 (oldc-S c))))
-    (cond
-      ((or (untyped-var? c t1^) (untyped-var? c t2^)) #f)
-      ((var? t1^) (var-type-mismatch? c t1^ t2^))
-      ((var? t2^) (var-type-mismatch? c t2^ t1^))
-      (else (error 'term-ununifiable? "invariant violation")))))
+  (cond
+    ((or (untyped-var? c t1) (untyped-var? c t2)) #f)
+    ((var? t1) (var-type-mismatch? c t1 t2))
+    ((var? t2) (var-type-mismatch? c t2 t1))
+    (else (error 'term-ununifiable? "invariant violation"))))
 
 (define (untyped-var? c t^)
   (and (var? t^)
@@ -754,24 +729,20 @@
 (define (absento->diseq t)
   (list t))
 
-(define (move-A-to-D-b/c-a-rhs-atom c)
-  (let-values (((to-move A^)
+(define (drop-a-because-rhs-atom c)
+  (let-values (((to-drop A^)
                 (partition
                   (lambda (t)
-                    (let ((t-rhs^ (walk (rhs t) (oldc-S c))))
-                      (and (not (untyped-var? c t-rhs^))
-                           (not (pair? t-rhs^)))))
+                    (and (not (untyped-var? c (rhs t)))
+                         (not (pair? (rhs t)))))
                   (oldc-A c))))
-    (if (not (null? to-move))
-        (let ((D^ (append (map absento->diseq to-move) (oldc-D c))))
-          (oldc-with-A
-            (oldc-with-D c D^)
-            A^))
-        c)))
+    (if (not (null? to-drop))
+      (oldc-with-A c A^)
+      c)))
 
 ; Drop disequalities that are subsumed by an absento contraint,
 ; interpreted as a disequality.
-(define (drop-from-D-b/c-A c)
+(define (drop-d-because-A c)
   (let-values (((subsumed D^)
                 (partition
                   (lambda (d)
@@ -789,13 +760,11 @@
 ; Example:
 ;  (absento (list x y z) x) is trivially true because a violation would
 ;  require x to occur within itself.
-(define (drop-a-b/c-a-rhs-occurs-a-lhs c)
+(define (drop-a-because-rhs-occurs-lhs c)
   (let-values (((to-drop A^)
                 (partition
                   (lambda (t)
-                    (let ((t-lhs^ (walk (lhs t) (oldc-S c)))
-                          (t-rhs^ (walk (rhs t) (oldc-S c))))
-                      (occurs-check t-rhs^ t-lhs^ (oldc-S c))))
+                    (occurs-check (rhs t) (lhs t) (oldc-S c)))
                   (oldc-A c))))
     (if (not (null? to-drop))
       (oldc-with-A c A^)
@@ -885,7 +854,7 @@
                                      (walk* v R))))
                             (remove-duplicates vs)))))
                 (map type-constraint-reified type-constraints))))
-      ;; T^ :: (alist type-constraint-symbol (list-of reified-var))
+      ;; T^ : (alist type-constraint-symbol (list-of reified-var))
       (form (walk* v R) (walk* D R) T^ (walk* A R)))))
 
 (define form
