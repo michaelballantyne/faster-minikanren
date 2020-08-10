@@ -7,7 +7,7 @@
          == =/=
          fresh
          conde
-         symbolo numbero
+         symbolo numbero stringo
          absento
          project
          var?)
