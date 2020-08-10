@@ -474,15 +474,20 @@
 
 (define-syntax declare-type-constraints
   (syntax-rules ()
-    ((_ tc-list (name predicate reified) ...)
+    ((_ tc-list (name predicate reified ordering) ...)
      (begin
-       (define name (apply-type-constraint (type-constraint predicate 'name 'reified)))
-       ...
-       (define tc-list '(reified ...))))))
+       (define tc-list (list (type-constraint predicate 'name 'reified) ...))
+       (define-values
+         (name ...)
+         (apply values
+                (map apply-type-constraint tc-list)))
+       ))))
 
 (declare-type-constraints type-constraints
-  (numbero number? num)
-  (symbolo symbol? sym))
+  (numbero number? num <=)
+  (stringo string? str string<=?)
+  (symbolo symbol? sym (lambda (s1 s2) (string<? (symbol->string s1)
+                                                 (symbol->string s2)))))
 
 ; Options:
 ;   table mapping symbol -> predicate
@@ -879,7 +884,7 @@
                                      (eq? tc-type (type-constraint-reified tc))
                                      (walk* v R))))
                             (remove-duplicates vs)))))
-                type-constraints)))
+                (map type-constraint-reified type-constraints))))
       ;; T^ :: (alist type-constraint-symbol (list-of reified-var))
       (form (walk* v R) (walk* D R) T^ (walk* A R)))))
 
@@ -928,10 +933,10 @@
 
 (define lex<-reified-name?
   (lambda (r)
-    (char<?
-     (string-ref
-      (datum->string r) 0)
-     #\_)))
+         (char<?
+           (string-ref
+             (datum->string r) 0)
+           #\_)))
 
 (define (drop-dot-D D)
   (map drop-dot D))
@@ -941,8 +946,9 @@
        X))
 
 (define (lex<=? x y)
+
   (string<=? (datum->string x) (datum->string y)))
 
 (define (datum->string x)
   (call-with-string-output-port
-    (lambda (p) (display x p))))
+    (lambda (p) (write x p))))

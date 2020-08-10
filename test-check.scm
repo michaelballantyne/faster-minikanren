@@ -10,5 +10,5 @@
          (or (equal? expected produced)
              (begin
                (set! test-failed #t)
-               (printf "Failed: ~a~%Expected: ~a~%Computed: ~a~%"
+               (printf "Failed: ~s~%Expected: ~s~%Computed: ~s~%"
                      'tested-expression expected produced))))))))
