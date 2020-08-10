@@ -452,3 +452,11 @@
 (test "=/=-55"
   (run 1 (q) (=/= q #f))
   '((_.0 (=/= ((_.0 #f))))))
+
+(test "non watch-var pair implies satisfied"
+  (run 1 (a b c d)
+       (=/= (cons a c)
+            (cons b d))
+       (== c '(1 . 2))
+       (== d '(1 . 3)))
+  '((_.0 _.1 (1 . 2) (1 . 3))))

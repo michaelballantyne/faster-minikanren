@@ -686,37 +686,64 @@
 (define (simplify c)
   (foldl (lambda (f c) (f c)) c
          (list
-           drop-a-because-rhs-atom
-           drop-d-because-T
-           drop-d-because-A
-           drop-a-because-rhs-occurs-lhs)))
+           ; drop these first so that (drop-D d-subsumed-by-A?) does not drop corresponding diseqs.
+           (drop-A absento-rhs-atomic?)
+           (drop-A absento-rhs-occurs-lhs?)
+           (drop-D d-subsumed-by-T?)
+           (drop-D d-subsumed-by-A?))))
 
-; Drops disequalities that are fully satisfied because the types are disjoint
+(define (drop-D pred)
+  (lambda (c) (oldc-with-D c (filter (lambda (v) (not (pred c v))) (oldc-D c)))))
+(define (drop-A pred)
+  (lambda (c) (oldc-with-A c (filter (lambda (v) (not (pred c v))) (oldc-A c)))))
+
+; Drop absento constraints where the RHS is known to be atomic, such that
+; the disequality attached by absento solving is sufficient.
+(define (absento-rhs-atomic? c a)
+  ; absento on pairs is pushed down and type constraints are atomic,
+  ; so the only kind of non-atomic RHS is an untyped var.
+  (not (untyped-var? c (rhs a))))
+
+; Drop absento constraints that are trivially satisfied because
+; any violation would cause a failure of the occurs check.
+; Example:
+;  (absento (list x y z) x) is trivially true because a violation would
+;  require x to occur within itself.
+(define (absento-rhs-occurs-lhs? c a)
+  (occurs-check (rhs a) (lhs a) (oldc-S c)))
+
+; Drop disequalities that are subsumed by an absento contraint
+; interpreted as a disequality.
+(define (d-subsumed-by-A? c d)
+  (exists (lambda (a)
+            (d-subsumed-by? d (absento->diseq a)))
+          (oldc-A c)))
+
+; Drop disequalities that are fully satisfied because the types are disjoint
 ; either due to type constraints or ground values.
 ; Examples:
 ;  * given (symbolo x) and (numbero y), (=/= x y) is dropped.
-(define (drop-d-because-T c)
-  (let-values (((conflicted D^)
-                (partition
-                  (lambda (d)
-                    (exists (lambda (pr)
-                              (term-ununifiable? c (lhs pr) (rhs pr)))
-                            d))
-                  (oldc-D c))))
-              (if (not (null? conflicted))
-                (oldc-with-D c D^)
-                c)))
+(define (d-subsumed-by-T? c d)
+  (exists (lambda (pr)
+            (term-ununifiable? c (lhs pr) (rhs pr)))
+          d))
 
 (define (term-ununifiable? c t1 t2)
+  ; t1 is always a var in fully simplified diseqs. Oh. But here we just walk the LHS. May not be full simpl.
+  ; So could have pair that wasn't watch var for solving; sides got constrained; got walked to values
+  ; in reify; and imply that the diseq is unifiable. I'll try to make a test.
   (cond
     ((or (untyped-var? c t1) (untyped-var? c t2)) #f)
     ((var? t1) (var-type-mismatch? c t1 t2))
     ((var? t2) (var-type-mismatch? c t2 t1))
-    (else (error 'term-ununifiable? "invariant violation"))))
+    ((and (pair? t1) (pair? t2))
+         (or (term-ununifiable? c (car t1) (car t2))
+             (term-ununifiable? c (cdr t1) (cdr t2))))
+    (else (not (eqv? t1 t2)))))
 
-(define (untyped-var? c t^)
-  (and (var? t^)
-       (eq? unbound (subst-map-lookup t^ (oldc-T c)))))
+(define (untyped-var? c t)
+  (and (var? t)
+       (eq? unbound (subst-map-lookup t (oldc-T c)))))
 
 (define var-type-mismatch?
   (lambda (c t1^ t2^)
@@ -729,46 +756,6 @@
 (define (absento->diseq t)
   (list t))
 
-(define (drop-a-because-rhs-atom c)
-  (let-values (((to-drop A^)
-                (partition
-                  (lambda (t)
-                    (and (not (untyped-var? c (rhs t)))
-                         (not (pair? (rhs t)))))
-                  (oldc-A c))))
-    (if (not (null? to-drop))
-      (oldc-with-A c A^)
-      c)))
-
-; Drop disequalities that are subsumed by an absento contraint,
-; interpreted as a disequality.
-(define (drop-d-because-A c)
-  (let-values (((subsumed D^)
-                (partition
-                  (lambda (d)
-                    (exists
-                      (lambda (t)
-                        (d-subsumed-by? d (absento->diseq t)))
-                      (oldc-A c)))
-                  (oldc-D c))))
-    (if (not (null? subsumed))
-      (oldc-with-D c D^)
-      c)))
-
-; Drop absento constraints that are trivially satisfied because
-; any violation would cause a failure of the occurs check.
-; Example:
-;  (absento (list x y z) x) is trivially true because a violation would
-;  require x to occur within itself.
-(define (drop-a-because-rhs-occurs-lhs c)
-  (let-values (((to-drop A^)
-                (partition
-                  (lambda (t)
-                    (occurs-check (rhs t) (lhs t) (oldc-S c)))
-                  (oldc-A c))))
-    (if (not (null? to-drop))
-      (oldc-with-A c A^)
-      c)))
 
 (define anyvar?
   (lambda (u r)
