@@ -946,7 +946,8 @@
        X))
 
 (define (lex<=? x y)
-
+  ; TODO: order by type of value; possibly using order in
+  ; declare-type-constraints?
   (string<=? (datum->string x) (datum->string y)))
 
 (define (datum->string x)
