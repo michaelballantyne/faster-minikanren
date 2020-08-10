@@ -6,16 +6,13 @@
 ; a new scope.
 
 ; Creates a new scope that is not scope-eq? to any other scope
-(define new-scope
-  (lambda ()
-    (list 'scope)))
+(define (new-scope) (list 'scope))
 
 ; Scope used when variable bindings should always be made in the
 ; substitution, as in disequality solving and reification. We
 ; don't want to set-var-val! a variable when checking if a
 ; disequality constraint holds!
-(define nonlocal-scope
-  (list 'non-local-scope))
+(define nonlocal-scope (list 'non-local-scope))
 
 (define scope-eq? eq?)
 
@@ -211,7 +208,7 @@
 (define (ext-s-check x v S)
   (if (occurs-check x v S)
     (values #f #f)
-    (values (subst-add S x v) (cons x v))))
+    (values (subst-add S x v) (list (cons x v)))))
 
 ; Returns as values the extended substitution and a list of
 ; associations added during the unification, or (values #f #f) if the
@@ -342,7 +339,7 @@
   (syntax-rules ()
     ((_ e) e)
     ((_ e0 e ...)
-     (mplus e0 (inc (mplus* e ...)))))
+     (mplus e0 (inc (mplus* e ...))))))
 
 ; -> Goal
 (define-syntax fresh
@@ -351,10 +348,9 @@
      (lambdag@ (st)
        ; this inc triggers interleaving
        (inc
-         (let* ((scope (subst-scope (state-S st)))
-                (x (var scope)))
-           (bind* (g0 st) g ...)))))))
-
+         (let ((scope (subst-scope (state-S st))))
+           (let ((x (var scope)) ...)
+             (bind* (g0 st) g ...))))))))
 
 ; -> Goal
 (define-syntax conde
@@ -512,7 +508,6 @@
       (if S^
         (and-foldl update-constraints (state S^ (state-C st)) added)
         #f))))
-
 
 ; Not fully optimized. Could do absento update with fewer
 ; hash-refs / hash-sets.
@@ -817,8 +812,8 @@
       (else pr))))
 
 (define (lex<-reified-name? r)
-  (char<?i (string-ref (datum->string r) 0)
-           #\_))
+  (char<? (string-ref (datum->string r) 0)
+          #\_))
 
 (define (drop-dot-D D)
   (map drop-dot D))
