@@ -75,6 +75,13 @@
 ; Implementation of the substitution map depends on the Scheme used,
 ; as we need a map. See mk.rkt and mk-vicare.scm.
 
+(define empty-subst-map empty-intmap)
+(define subst-map-length intmap-count)
+(define (subst-map-lookup u S)
+  (intmap-ref S (var-idx u)))
+(define (subst-map-add S var val)
+  (intmap-set S (var-idx var) val))
+
 (define subst
   (lambda (mapping scope)
     (cons mapping scope)))
@@ -172,8 +179,25 @@
 ; are always on the representative element and must be moved / merged
 ; when that element changes.
 
-; Implementation depends on the Scheme used, as we need a map. See
-; mk.rkt and mk-vicare.scm.
+(define empty-C empty-intmap)
+
+(define (set-c st v c)
+  (state-with-C
+    st
+    (intmap-set (state-C st) (var-idx v) c)))
+
+(define (lookup-c st v)
+  (let ((res (intmap-ref (state-C st) (var-idx v))))
+    (if (not (eq? unbound res))
+      res
+      empty-c)))
+
+; t:unbind in mk-chez.scm either is buggy or doesn't do what I would expect, so
+; I implement remove by setting the value to the empty constraint record.
+(define remove-c
+  (lambda (v st)
+    (state-with-C st (intmap-set (state-C st) (var-idx v) empty-c))))
+
 
 ; State object.
 ; The state is the value that is monadically passed through the search
@@ -189,6 +213,9 @@
 (define state-C (lambda (st) (cdr st)))
 
 (define empty-state (state empty-subst empty-C))
+
+(define (state-with-C st C^)
+  (state (state-S st) C^))
 
 (define state-with-scope
   (lambda (st new-scope)
@@ -436,11 +463,11 @@
           (cond
             ((type-pred term) st)
             ((var? term)
-             (let* ((c (lookup-c term st))
+             (let* ((c (lookup-c st term))
                     (T (c-T c)))
                (cond
                  ((eq? T tc) st)
-                 ((not T) (set-c term (c-with-T c tc) st))
+                 ((not T) (set-c st term (c-with-T c tc)))
                  (else #f))))
             (else #f)))))))
 
@@ -462,9 +489,9 @@
 ;   store both
 
 (define (add-to-D st v d)
-  (let* ((c (lookup-c v st))
+  (let* ((c (lookup-c st v))
          (c^ (c-with-D c (cons d (c-D c)))))
-    (set-c v c^ st)))
+    (set-c st v c^)))
 
 (define =/=*
   (lambda (S+)
@@ -504,12 +531,12 @@
                    (let ((st^ ((absento term1 (car term2)) st)))
                      (and st^ ((absento term1 (cdr term2)) st^))))
                   ((var? term2)
-                   (let* ((c (lookup-c term2 st))
+                   (let* ((c (lookup-c st term2))
                           (A (c-A c)))
                      (if (memv term1 A)
                          st
                          (let ((c^ (c-with-A c (cons term1 A))))
-                           (set-c term2 c^ st)))))
+                           (set-c st term2 c^)))))
                   (else st))
                 #f)))))))
 
@@ -536,7 +563,7 @@
 ; hash-refs / hash-sets.
 (define update-constraints
   (lambda (a st)
-    (let ([old-c (lookup-c (lhs a) st)])
+    (let ([old-c (lookup-c st (lhs a))])
       (if (eq? old-c empty-c)
         st
         (let ((st (remove-c (lhs a) st)))
@@ -608,7 +635,7 @@
   (let ((vs (vars (walk* x (state-S st)) '())))
     (foldl
       (lambda (v c-store)
-        (let ((c (lookup-c v st)))
+        (let ((c (lookup-c st v)))
           (let ((T^ (c-T c))
                 (D^ (c-D c))
                 (A^ (c-A c)))

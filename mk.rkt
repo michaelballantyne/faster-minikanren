@@ -12,6 +12,11 @@
          project
          var?)
 
+(define empty-intmap (hasheq))
+(define (intmap-count m) (hash-count m))
+(define (intmap-ref m k) (hash-ref m k (lambda () unbound)))
+(define (intmap-set m k v) (hash-set m k v))
+
 ;; extra stuff for racket
 ;; due mostly to samth
 (define (list-sort f l) (sort l f))
@@ -33,41 +38,5 @@
 (define memp memf)
 
 (define (var*? v) (var? (car v)))
-
-
-; Substitution representation
-
-(define empty-subst-map (hasheq))
-
-(define subst-map-length hash-count)
-
-; Returns #f if not found, or a pair of u and the result of the lookup.
-; This distinguishes between #f indicating absence and being the result.
-(define subst-map-lookup
-  (lambda (u S)
-    (hash-ref S u unbound)))
-
-(define (subst-map-add S var val)
-  (hash-set S var val))
-
-(define subst-map-eq? eq?)
-
-
-; Constraint store representation
-
-(define empty-C (hasheq))
-
-(define set-c
-  (lambda (v c st)
-    (state (state-S st) (hash-set (state-C st) v c))))
-
-(define lookup-c
-  (lambda (v st)
-    (hash-ref (state-C st) v empty-c)))
-
-(define remove-c
-  (lambda (v st)
-    (state (state-S st) (hash-remove (state-C st) v))))
-
 
 (include "mk.scm")
