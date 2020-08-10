@@ -686,7 +686,7 @@
                     (rem-subsumed d-subsumed-by? D^))
                   (oldc-T c) ; don't remove unreified because later we pull out only the bits we need for reified result.
                   (let ((A^ (remp any-var-unreified? (oldc-A c))))
-                    (rem-subsumed t-subsumed-by? A^)))))))
+                    (rem-subsumed a-subsumed-by? A^)))))))
 
 (define (simplify c)
   (foldl (lambda (f c) (f c)) c
@@ -777,7 +777,7 @@
 ; Note that absento constraints are pushed down to tree leaves, so we would never have
 ;  (absento 'closure q) given (== q (list x)). Thus we do not need to consider subsumption
 ;  between absento constraints on q and x.
-(define (t-subsumed-by? t1 t2)
+(define (a-subsumed-by? t1 t2)
   (and (var-eq? (rhs t1) (rhs t2)) (member* (lhs t2) (lhs t1))))
 
 (define (member* u v)
