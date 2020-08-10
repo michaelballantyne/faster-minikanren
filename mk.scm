@@ -444,8 +444,17 @@
                  (else #f))))
             (else #f)))))))
 
-(define symbolo (apply-type-constraint (type-constraint symbol? 'symbolo)))
-(define numbero (apply-type-constraint (type-constraint number? 'numbero)))
+(define-syntax declare-type-constraints
+  (syntax-rules ()
+    ((_ tc-list (name predicate) ...)
+     (begin
+       (define name (apply-type-constraint (type-constraint predicate 'name)))
+       ...
+       (define tc-list '(name ...))))))
+
+(declare-type-constraints type-constraints
+  (symbolo symbol?)
+  (numbero number?))
 
 ; Options:
 ;   table mapping symbol -> predicate
@@ -571,25 +580,25 @@
 ; N - numbero
 ; T - absento
 
-(define (oldc S D Y N T)
-  (list S D Y N T))
+(define (oldc S D Y N A)
+  (list S D Y N A))
 
 (define oldc-S (lambda (c) (car c)))
 (define oldc-D (lambda (c) (cadr c)))
 (define oldc-Y (lambda (c) (caddr c)))
 (define oldc-N (lambda (c) (cadddr c)))
-(define oldc-T (lambda (c) (cadddr (cdr c))))
+(define oldc-A (lambda (c) (cadddr (cdr c))))
 
 (define (oldc-with-S c S^)
-  (oldc S^ (oldc-D c) (oldc-Y c) (oldc-N c) (oldc-T c)))
+  (oldc S^ (oldc-D c) (oldc-Y c) (oldc-N c) (oldc-A c)))
 (define (oldc-with-D c D^)
-  (oldc (oldc-S c) D^ (oldc-Y c) (oldc-N c) (oldc-T c)))
+  (oldc (oldc-S c) D^ (oldc-Y c) (oldc-N c) (oldc-A c)))
 (define (oldc-with-Y c Y^)
-  (oldc (oldc-S c) (oldc-D c) Y^ (oldc-N c) (oldc-T c)))
+  (oldc (oldc-S c) (oldc-D c) Y^ (oldc-N c) (oldc-A c)))
 (define (oldc-with-N c N^)
-  (oldc (oldc-S c) (oldc-D c) (oldc-Y c) N^ (oldc-T c)))
-(define (oldc-with-T c T^)
-  (oldc (oldc-S c) (oldc-D c) (oldc-Y c) (oldc-N c) T^))
+  (oldc (oldc-S c) (oldc-D c) (oldc-Y c) N^ (oldc-A c)))
+(define (oldc-with-A c A^)
+  (oldc (oldc-S c) (oldc-D c) (oldc-Y c) (oldc-N c) A^))
 
 ; Create a constraint store of the old representation from a state
 ; object, so that we can use the old reifier. Only accumulates
@@ -614,7 +623,7 @@
                 (oldc-N c-store))
               (append
                 (map (lambda (absento-lhs) (cons absento-lhs v)) (c-A c))
-                (oldc-T c-store))))))
+                (oldc-A c-store))))))
       (oldc (state-S st) '() '() '() '())
       (remove-duplicates vs))))
 
@@ -634,7 +643,7 @@
       (let ((D (walk* (oldc-D c) S))
             (Y (walk* (oldc-Y c) S))
             (N (walk* (oldc-N c) S))
-            (T (walk* (oldc-T c) S)))
+            (A (walk* (oldc-A c) S)))
         (let* ((v (walk* x S))
                (R (reify-S v (subst empty-subst-map nonlocal-scope)))
                (any-var-unreified? (lambda (term) (anyvar? term R))))
@@ -648,16 +657,16 @@
                     (rem-subsumed d-subsumed-by? D^))
                   (remp any-var-unreified? Y)
                   (remp any-var-unreified? N)
-                  (let ((T^ (remp any-var-unreified? T)))
-                    (rem-subsumed t-subsumed-by? T^))))))))
+                  (let ((A^ (remp any-var-unreified? A)))
+                    (rem-subsumed t-subsumed-by? A^))))))))
 
 (define (fixed-point-simplify c)
   (define (apply-all-simplifications c)
     (foldl app1 c
            (list drop-D-b/c-Y-or-N
-                 move-T-to-D-b/c-t2-atom
-                 drop-from-D-b/c-T
-                 drop-t-b/c-t2-occurs-t1)))
+                 move-A-to-D-b/c-a-rhs-atom
+                 drop-from-D-b/c-A
+                 drop-a-b/c-a-rhs-occurs-a-lhs)))
   (fixed-point apply-all-simplifications c))
 
 (define (app1 f c) (f c))
@@ -726,31 +735,31 @@
 (define (absento->diseq t)
   (list t))
 
-(define (move-T-to-D-b/c-t2-atom c)
-  (let-values (((to-move T^)
+(define (move-A-to-D-b/c-a-rhs-atom c)
+  (let-values (((to-move A^)
                 (partition
                   (lambda (t)
                     (let ((t-rhs^ (walk (rhs t) (oldc-S c))))
                       (and (not (untyped-var? c t-rhs^))
                            (not (pair? t-rhs^)))))
-                  (oldc-T c))))
+                  (oldc-A c))))
     (if (not (null? to-move))
         (let ((D^ (append (map absento->diseq to-move) (oldc-D c))))
-          (oldc-with-T
+          (oldc-with-A
             (oldc-with-D c D^)
-            T^))
+            A^))
         c)))
 
 ; Drop disequalities that are subsumed by an absento contraint,
 ; interpreted as a disequality.
-(define (drop-from-D-b/c-T c)
+(define (drop-from-D-b/c-A c)
   (let-values (((subsumed D^)
                 (partition
                   (lambda (d)
                     (exists
                       (lambda (t)
                         (d-subsumed-by? d (absento->diseq t)))
-                      (oldc-T c)))
+                      (oldc-A c)))
                   (oldc-D c))))
     (if (not (null? subsumed))
       (oldc-with-D c D^)
@@ -761,16 +770,16 @@
 ; Example:
 ;  (absento (list x y z) x) is trivially true because a violation would
 ;  require x to occur within itself.
-(define (drop-t-b/c-t2-occurs-t1 c)
-  (let-values (((to-drop T^)
+(define (drop-a-b/c-a-rhs-occurs-a-lhs c)
+  (let-values (((to-drop A^)
                 (partition
                   (lambda (t)
                     (let ((t-lhs^ (walk (lhs t) (oldc-S c)))
                           (t-rhs^ (walk (rhs t) (oldc-S c))))
                       (occurs-check t-rhs^ t-lhs^ (oldc-S c))))
-                  (oldc-T c))))
+                  (oldc-A c))))
     (if (not (null? to-drop))
-      (oldc-with-T c T^)
+      (oldc-with-A c A^)
       c)))
 
 (define anyvar?
@@ -843,15 +852,15 @@
     (string->symbol
       (string-append "_" "." (number->string n)))))
 
-(define (reify+ v R D Y N T)
-  (form (walk* v R) (walk* D R) (walk* Y R) (walk* N R) (walk* T R)))
+(define (reify+ v R D Y N A)
+  (form (walk* v R) (walk* D R) (walk* Y R) (walk* N R) (walk* A R)))
 
 (define form
-  (lambda (v D Y N T)
+  (lambda (v D Y N A)
     (let ((fd (sort-D D))
           (fy (sort-lex Y))
           (fn (sort-lex N))
-          (ft (sort-lex T)))
+          (ft (sort-lex A)))
       (let ((fd (if (null? fd) fd
                     (let ((fd (drop-dot-D fd)))
                       `((=/= . ,fd)))))
