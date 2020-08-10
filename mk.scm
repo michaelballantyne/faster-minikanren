@@ -644,7 +644,7 @@
                 (A^ (c-A c)))
             (oldc
               (oldc-S c-store)
-              (append (walk* D^ (state-S st)) (oldc-D c-store))
+              (append (filter (lambda (x) x) (map (normalize-diseq (state-S st)) D^)) (oldc-D c-store))
               (if (c-T c)
                 (subst-map-add (oldc-T c-store) v (c-T c))
                 (oldc-T c-store))
@@ -653,6 +653,11 @@
                 (oldc-A c-store))))))
       (oldc (state-S st) '() empty-subst-map '())
       (remove-duplicates vs))))
+
+(define (normalize-diseq S)
+  (lambda (S+)
+    (let-values (((S^ S+^) (unify* S+ S)))
+      (and S^ (walk* S+^ S)))))
 
 (define (vars term acc)
   (cond
@@ -702,7 +707,7 @@
 (define (absento-rhs-atomic? c a)
   ; absento on pairs is pushed down and type constraints are atomic,
   ; so the only kind of non-atomic RHS is an untyped var.
-  (not (untyped-var? c (rhs a))))
+  (not (and (var? (rhs a)) (eq? unbound (var-type c (rhs a))))))
 
 ; Drop absento constraints that are trivially satisfied because
 ; any violation would cause a failure of the occurs check.
@@ -724,38 +729,21 @@
 ; Examples:
 ;  * given (symbolo x) and (numbero y), (=/= x y) is dropped.
 (define (d-subsumed-by-T? c d)
-  (exists (lambda (pr)
-            (term-ununifiable? c (lhs pr) (rhs pr)))
+  (exists (lambda (pr) (not (var-types-match? c (lhs pr) (rhs pr))))
           d))
 
-(define (term-ununifiable? c t1 t2)
-  ; t1 is always a var in fully simplified diseqs. Oh. But here we just walk the LHS. May not be full simpl.
-  ; So could have pair that wasn't watch var for solving; sides got constrained; got walked to values
-  ; in reify; and imply that the diseq is unifiable. I'll try to make a test.
-  (cond
-    ((or (untyped-var? c t1) (untyped-var? c t2)) #f)
-    ((var? t1) (var-type-mismatch? c t1 t2))
-    ((var? t2) (var-type-mismatch? c t2 t1))
-    ((and (pair? t1) (pair? t2))
-         (or (term-ununifiable? c (car t1) (car t2))
-             (term-ununifiable? c (cdr t1) (cdr t2))))
-    (else (not (eqv? t1 t2)))))
+(define (var-types-match? c t1 t2)
+  (or (eq? unbound (var-type c t1))
+      (if (var? t2)
+        (or (eq? unbound (var-type c t2))
+            (eq? (var-type c t1) (var-type c t2)))
+        ((type-constraint-predicate (var-type c t1))
+         t2))))
 
-(define (untyped-var? c t)
-  (and (var? t)
-       (eq? unbound (subst-map-lookup t (oldc-T c)))))
-
-(define var-type-mismatch?
-  (lambda (c t1^ t2^)
-    (let ((t1-tc (subst-map-lookup t1^ (oldc-T c))))
-      (if (var? t2^)
-        (let ((t2-tc (subst-map-lookup t2^ (oldc-T c))))
-          (not (eq? t1-tc t2-tc)))
-        (not ((type-constraint-predicate t1-tc) t2^))))))
+(define (var-type c t) (subst-map-lookup t (oldc-T c)))
 
 (define (absento->diseq t)
   (list t))
-
 
 (define anyvar?
   (lambda (u r)
@@ -763,7 +751,8 @@
       ((pair? u)
        (or (anyvar? (car u) r)
            (anyvar? (cdr u) r)))
-      (else (var? (walk u r))))))
+      (else
+        (var? (walk u r))))))
 
 (define (rem-subsumed subsumed-by? el*)
   (define (subsumed-by-one-of? el el*)
