@@ -449,10 +449,11 @@
 ;      incorrectness in combination with disequality constraints,
 ;      like: (fresh (x) (booleano x) (=/= x #t) (=/= x #f))
 
-(define (type-constraint predicate symbol)
-  (cons predicate symbol))
+(define (type-constraint predicate symbol reified)
+  (list predicate symbol reified))
 (define type-constraint-predicate car)
-(define type-constraint-symbol cdr)
+(define type-constraint-symbol cadr)
+(define type-constraint-reified caddr)
 
 (define (apply-type-constraint tc)
   (lambda (u)
@@ -473,15 +474,15 @@
 
 (define-syntax declare-type-constraints
   (syntax-rules ()
-    ((_ tc-list (name predicate) ...)
+    ((_ tc-list (name predicate reified) ...)
      (begin
-       (define name (apply-type-constraint (type-constraint predicate 'name)))
+       (define name (apply-type-constraint (type-constraint predicate 'name 'reified)))
        ...
-       (define tc-list '(name ...))))))
+       (define tc-list '(reified ...))))))
 
 (declare-type-constraints type-constraints
-  (symbolo symbol?)
-  (numbero number?))
+  (numbero number? num)
+  (symbolo symbol? sym))
 
 ; Options:
 ;   table mapping symbol -> predicate
@@ -607,25 +608,22 @@
 ; N - numbero
 ; T - absento
 
-(define (oldc S D Y N A)
-  (list S D Y N A))
+(define (oldc S D T A)
+  (list S D T A))
 
 (define oldc-S (lambda (c) (car c)))
 (define oldc-D (lambda (c) (cadr c)))
-(define oldc-Y (lambda (c) (caddr c)))
-(define oldc-N (lambda (c) (cadddr c)))
-(define oldc-A (lambda (c) (cadddr (cdr c))))
+(define oldc-T (lambda (c) (caddr c)))
+(define oldc-A (lambda (c) (cadddr c)))
 
 (define (oldc-with-S c S^)
-  (oldc S^ (oldc-D c) (oldc-Y c) (oldc-N c) (oldc-A c)))
+  (oldc S^ (oldc-D c) (oldc-T c) (oldc-A c)))
 (define (oldc-with-D c D^)
-  (oldc (oldc-S c) D^ (oldc-Y c) (oldc-N c) (oldc-A c)))
-(define (oldc-with-Y c Y^)
-  (oldc (oldc-S c) (oldc-D c) Y^ (oldc-N c) (oldc-A c)))
-(define (oldc-with-N c N^)
-  (oldc (oldc-S c) (oldc-D c) (oldc-Y c) N^ (oldc-A c)))
+  (oldc (oldc-S c) D^ (oldc-T c) (oldc-A c)))
+(define (oldc-with-T c T^)
+  (oldc (oldc-S c) (oldc-D c) T^ (oldc-A c)))
 (define (oldc-with-A c A^)
-  (oldc (oldc-S c) (oldc-D c) (oldc-Y c) (oldc-N c) A^))
+  (oldc (oldc-S c) (oldc-D c) (oldc-T c) A^))
 
 ; Create a constraint store of the old representation from a state
 ; object, so that we can use the old reifier. Only accumulates
@@ -642,16 +640,21 @@
             (oldc
               (oldc-S c-store)
               (append D^ (oldc-D c-store))
-              (if (and (c-T c) (eq? (type-constraint-symbol (c-T c)) 'symbolo))
-                (cons v (oldc-Y c-store))
-                (oldc-Y c-store))
-              (if (and (c-T c) (eq? (type-constraint-symbol (c-T c)) 'numbero))
-                (cons v (oldc-N c-store))
-                (oldc-N c-store))
+              (if (c-T c)
+                (begin
+                  ;(display "extending:\n")
+                  ;(display v)
+                  ;(display "\n")
+                  ;(display (c-T c))
+                  ;(display "\n")
+                  ;(display (subst-map-add (oldc-T c-store) v (c-T c)))
+                  ;(display "\n")
+                  (subst-map-add (oldc-T c-store) v (c-T c)))
+                (oldc-T c-store))
               (append
                 (map (lambda (absento-lhs) (cons absento-lhs v)) (c-A c))
                 (oldc-A c-store))))))
-      (oldc (state-S st) '() '() '() '())
+      (oldc (state-S st) '() empty-subst-map '())
       (remove-duplicates vs))))
 
 (define (vars term acc)
@@ -665,11 +668,14 @@
 
 (define (reify x)
   (lambda (st)
-    (let* ((c (fixed-point-simplify (c-from-st st x)))
+
+    (let* ((c (c-from-st st x))
+           ;(_1 (begin
+                 ;(display "before simplify:\n")
+                 ;(display (oldc-T c))))
+           (c (fixed-point-simplify c))
            (S (oldc-S c)))
       (let ((D (walk* (oldc-D c) S))
-            (Y (walk* (oldc-Y c) S))
-            (N (walk* (oldc-N c) S))
             (A (walk* (oldc-A c) S)))
         (let* ((v (walk* x S))
                (R (reify-S v (subst empty-subst-map nonlocal-scope)))
@@ -682,15 +688,14 @@
                   ; to satisfy the constraint.
                   (let ((D^ (remp any-var-unreified? D)))
                     (rem-subsumed d-subsumed-by? D^))
-                  (remp any-var-unreified? Y)
-                  (remp any-var-unreified? N)
+                  (oldc-T c) ; maybe need to remove unreified?
                   (let ((A^ (remp any-var-unreified? A)))
                     (rem-subsumed t-subsumed-by? A^))))))))
 
 (define (fixed-point-simplify c)
   (define (apply-all-simplifications c)
     (foldl app1 c
-           (list drop-D-b/c-Y-or-N
+           (list drop-D-b/c-T
                  move-A-to-D-b/c-a-rhs-atom
                  drop-from-D-b/c-A
                  drop-a-b/c-a-rhs-occurs-a-lhs)))
@@ -708,7 +713,7 @@
 ; either due to type constraints or ground values.
 ; Examples:
 ;  * given (symbolo x) and (numbero y), (=/= x y) is dropped.
-(define (drop-D-b/c-Y-or-N c)
+(define (drop-D-b/c-T c)
   (let-values (((conflicted D^)
                 (partition
                   (lambda (d)
@@ -730,34 +735,16 @@
       (else (error 'term-ununifiable? "invariant violation")))))
 
 (define (untyped-var? c t^)
-  (let ((in-type? (lambda (y) (var-eq? (walk y (oldc-S c)) t^))))
-    (and (var? t^)
-         (not (exists in-type? (oldc-Y c)))
-         (not (exists in-type? (oldc-N c))))))
+  (and (var? t^)
+       (eq? unbound (subst-map-lookup t^ (oldc-T c)))))
 
 (define var-type-mismatch?
   (lambda (c t1^ t2^)
-    (cond
-      ((num? (oldc-S c) (oldc-N c) t1^) (not (num? (oldc-S c) (oldc-N c) t2^)))
-      ((sym? (oldc-S c) (oldc-Y c) t1^) (not (sym? (oldc-S c) (oldc-Y c) t2^)))
-      (else #f))))
-
-(define num?
-  (lambda (S N n)
-    (cond
-      ((var? n) (tagged? S N n))
-      (else (number? n)))))
-
-(define sym?
-  (lambda (S Y y)
-    (cond
-      ((var? y) (tagged? S Y y))
-      (else (symbol? y)))))
-
-(define tagged?
-  (lambda (S tagged-store y^)
-    (exists (lambda (y) (eqv? (walk y S) y^)) tagged-store)))
-
+    (let ((t1-tc (subst-map-lookup t1^ (oldc-T c))))
+      (if (var? t2^)
+        (let ((t2-tc (subst-map-lookup t2^ (oldc-T c))))
+          (not (eq? t1-tc t2-tc)))
+        (not ((type-constraint-predicate t1-tc) t2^))))))
 
 (define (absento->diseq t)
   (list t))
@@ -879,28 +866,45 @@
     (string->symbol
       (string-append "_" "." (number->string n)))))
 
-(define (reify+ v R D Y N A)
-  (form (walk* v R) (walk* D R) (walk* Y R) (walk* N R) (walk* A R)))
+(define (reify+ v R D T A)
+  (let ((vs (vars v '())))
+    (let ((T^ (map
+                (lambda (tc-type)
+                  (cons tc-type
+                        (filter (lambda (x) x)
+                          (map
+                            (lambda (v)
+                              (let ((tc (subst-map-lookup v T)))
+                                (and (not (eq? tc unbound))
+                                     (eq? tc-type (type-constraint-reified tc))
+                                     (walk* v R))))
+                            (remove-duplicates vs)))))
+                type-constraints)))
+      ;; T^ :: (alist type-constraint-symbol (list-of reified-var))
+      (form (walk* v R) (walk* D R) T^ (walk* A R)))))
 
 (define form
-  (lambda (v D Y N A)
+  (lambda (v D T^ A)
     (let ((fd (sort-D D))
-          (fy (sort-lex Y))
-          (fn (sort-lex N))
-          (ft (sort-lex A)))
+          (ft
+            (filter (lambda (x) x)
+                    (map
+                      (lambda (p)
+                        (let ((tc-type (car p)) (tc-vars (cdr p)))
+                          (and (not (null? tc-vars))
+                               `(,tc-type . ,(sort-lex tc-vars)))))
+                      T^)))
+          (fa (sort-lex A)))
       (let ((fd (if (null? fd) fd
                     (let ((fd (drop-dot-D fd)))
                       `((=/= . ,fd)))))
-            (fy (if (null? fy) fy `((sym . ,fy))))
-            (fn (if (null? fn) fn `((num . ,fn))))
-            (ft (if (null? ft) ft
-                    (let ((ft (drop-dot ft)))
-                      `((absento . ,ft))))))
+            (fa (if (null? fa) fa
+                    (let ((fa (drop-dot fa)))
+                      `((absento . ,fa))))))
         (cond
-          ((and (null? fd) (null? fy)
-                (null? fn) (null? ft))
+          ((and (null? fd) (null? ft) (null? fa))
            v)
-          (else (append `(,v) fd fn fy ft)))))))
+          (else (append `(,v) fd ft fa)))))))
 
 (define (sort-lex ls)
   (list-sort lex<=? ls))
