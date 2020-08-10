@@ -679,7 +679,7 @@
                   ; to satisfy the constraint.
                   (let ((D^ (remp any-var-unreified? (oldc-D c))))
                     (rem-subsumed d-subsumed-by? D^))
-                  (oldc-T c) ; maybe need to remove unreified?
+                  (oldc-T c) ; don't remove unreified because later we pull out only the bits we need for reified result.
                   (let ((A^ (remp any-var-unreified? (oldc-A c))))
                     (rem-subsumed t-subsumed-by? A^)))))))
 
