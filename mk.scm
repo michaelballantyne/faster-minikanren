@@ -402,17 +402,15 @@
 ;      incorrectness in combination with disequality constraints,
 ;      like: (fresh (x) (booleano x) (=/= x #t) (=/= x #f))
 
-(define (type-constraint predicate symbol reified)
-  (list predicate symbol reified))
+(define (type-constraint predicate reified)
+  (list predicate reified))
 (define type-constraint-predicate car)
-(define type-constraint-symbol cadr)
-(define type-constraint-reified caddr)
+(define type-constraint-reified cadr)
 
 (define (apply-type-constraint tc)
   (lambda (u)
     (lambdag@ (st)
-      (let ((type-pred (type-constraint-predicate tc))
-            (type-id (type-constraint-symbol tc)))
+      (let ((type-pred (type-constraint-predicate tc)))
         (let ((term (walk u (state-S st))))
           (cond
             ((type-pred term) st)
@@ -429,7 +427,7 @@
   (syntax-rules ()
     ((_ tc-list (name predicate reified ordering) ...)
      (begin
-       (define tc-list (list (type-constraint predicate 'name 'reified) ...))
+       (define tc-list (list (type-constraint predicate 'reified) ...))
        (define-values
          (name ...)
          (apply values (map apply-type-constraint tc-list)))))))
@@ -767,7 +765,7 @@
                                      (walk* v R))))
                             (remove-duplicates vs)))))
                 (map type-constraint-reified type-constraints))))
-      ;; T^ : (alist type-constraint-symbol (list-of reified-var))
+      ;; T^ : (alist type-constraint-reified (list-of reified-var))
       (form (walk* v R) (walk* D R) T^ (walk* A R)))))
 
 (define (form v D T^ A)
