@@ -603,7 +603,6 @@
 (define (simplify c)
   (foldl (lambda (f c) (f c)) c
          (list
-           ; drop these first so that (drop-D d-subsumed-by-A?) does not drop corresponding diseqs.
            (drop-A absento-rhs-atomic?)
            (drop-A absento-rhs-occurs-lhs?)
            (drop-D d-subsumed-by-T?)
@@ -630,10 +629,11 @@
   (occurs-check (rhs a) (lhs a) (oldc-S c)))
 
 ; Drop disequalities that are subsumed by an absento contraint
-; interpreted as a disequality.
+; that is not itself equivalent to just a disequality.
 (define (d-subsumed-by-A? c d)
   (exists (lambda (a)
-            (d-subsumed-by? d (absento->diseq a)))
+            (and (not (absento-rhs-atomic? c a))
+                 (d-subsumed-by? d (absento->diseq a))))
           (oldc-A c)))
 
 ; Drop disequalities that are fully satisfied because the types are disjoint
