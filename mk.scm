@@ -236,89 +236,61 @@
 (define (unify* S+ S)
   (unify (map lhs S+) (map rhs S+) S))
 
-
 ; Search
 
-; SearchStream: #f | Procedure | State | (Pair State (-> SearchStream))
+; SearchStream: #f | SuspendedStream | State | (Pair State SuspendedStream)
+; SuspendedStream: (-> SearchStream)
 
-; SearchStream constructor types. Names inspired by the plus monad?
-
-; -> SearchStream
-(define (mzero) #f)
-
-; c: State
-; -> SearchStream
-(define (unit c) c)
-
-; c: State
-; f: (-> SearchStream)
-; -> SearchStream
-;
-; f is a thunk to avoid unnecessary computation in the case that c is
-; the last answer needed to satisfy the query.
-(define (choice c f) (cons c f))
-
-; e: SearchStream
-; -> (-> SearchStream)
-(define-syntax inc
-  (syntax-rules ()
-    ((_ e) (lambda () e))))
-
-; Goal: (State -> SearchStream)
-
-; e: SearchStream
-; -> Goal
-(define-syntax lambdag@
-  (syntax-rules ()
-    ((_ (st) e) (lambda (st) e))))
-
-; Match on search streams. The state type must not be a pair with a
-; procedure in its cdr.
+; Match on search streams. The State type must not be a pair with a procedure
+; in its cdr, lest a single result be interpreted as multiple results.
 ;
 ; (() e0)     failure
-; ((f) e1)    inc for interleaving. separate from success or failure
-;               to ensure it goes all the way to the top of the tree.
-; ((c) e2)    single result. Used rather than (choice c (inc (mzero)))
-;               to avoid returning to search a part of the tree that
-;               will inevitably fail.
-; ((c f) e3)  multiple results.
+; ((f) e1)    suspension for interleaving. separate from success or failure to ensure
+;              it goes all the way to the top of the tree.
+; ((c) e2)    single result. Used rather than (cons c (lambda () #f))
+;              to avoid returning to search a part of the tree that
+;              will inevitably fail.
+; ((c f) e3)  multiple results. `f` is a thunk to avoid unnecessary computation
+;              in the case that the LHS the last answer needed to satisfy the
+;              query. It also triggers interleaving; the search looks for
+;              answers in alternate branches before returning.
 (define-syntax case-inf
   (syntax-rules ()
     ((_ e (() e0) ((f^) e1) ((c^) e2) ((c f) e3))
-     (let ((c-inf e))
+     (let ((stream e))
        (cond
-         ((not c-inf) e0)
-         ((procedure? c-inf)  (let ((f^ c-inf)) e1))
-         ((not (and (pair? c-inf)
-                 (procedure? (cdr c-inf))))
-          (let ((c^ c-inf)) e2))
-         (else (let ((c (car c-inf)) (f (cdr c-inf)))
+         ((not stream) e0)
+         ((procedure? stream)  (let ((f^ stream)) e1))
+         ((not (and (pair? stream)
+                 (procedure? (cdr stream))))
+          (let ((c^ stream)) e2))
+         (else (let ((c (car stream)) (f (cdr stream)))
                  e3)))))))
 
-; c-inf: SearchStream
-;     f: (-> SearchStream)
+; stream: SearchStream
+;      f: SuspendedStream:
 ; -> SearchStream
 ;
 ; f is a thunk to avoid unnecesarry computation in the case that the
 ; first answer produced by c-inf is enough to satisfy the query.
-(define (mplus c-inf f)
-  (case-inf c-inf
+(define (mplus stream f)
+  (case-inf stream
     (() (f))
-    ((f^) (inc (mplus (f) f^)))
-    ((c) (choice c f))
-    ((c f^) (choice c (inc (mplus (f) f^))))))
+    ((f^) (lambda () (mplus (f) f^)))
+    ((c) (cons c f))
+    ((c f^) (cons c (lambda () (mplus (f) f^))))))
 
-; c-inf: SearchStream
-;     g: Goal
+; stream: SearchStream
+;      g: Goal
 ; -> SearchStream
-(define (bind c-inf g)
-  (case-inf c-inf
-    (() (mzero))
-    ((f) (inc (bind (f) g)))
+(define (bind stream g)
+  (case-inf stream
+    (() #f)
+    ((f) (lambda () (bind (f) g)))
     ((c) (g c))
-    ((c f) (mplus (g c) (inc (bind (f) g))))))
+    ((c f) (mplus (g c) (lambda () (bind (f) g))))))
 
-; Int, SearchStream -> (ListOf SearchResult)
+; Int, SuspendedStream -> (ListOf SearchResult)
 (define (take n f)
   (if (and n (zero? n))
     '()
@@ -328,37 +300,40 @@
       ((c) (cons c '()))
       ((c f) (cons c (take (and n (- n 1)) f))))))
 
-; -> SearchStream
+; (bind* e:SearchStream g:Goal ...) -> SearchStream
 (define-syntax bind*
   (syntax-rules ()
     ((_ e) e)
     ((_ e g0 g ...) (bind* (bind e g0) g ...))))
 
-; -> SearchStream
+; (suspend e:SearchStream) -> SuspendedStream
+; Used to clearly mark the locations where search is suspended in order to
+; interleave with other branches.
+(define-syntax suspend (syntax-rules () ((_ body) (lambda () body))))
+
+; (mplus* e:SearchStream ...+) -> SearchStream
 (define-syntax mplus*
   (syntax-rules ()
     ((_ e) e)
     ((_ e0 e ...)
-     (mplus e0 (inc (mplus* e ...))))))
+     (mplus e0 (suspend (mplus* e ...))))))
 
-; -> Goal
+; (fresh (x:id ...) g:Goal ...+) -> Goal
 (define-syntax fresh
   (syntax-rules ()
     ((_ (x ...) g0 g ...)
-     (lambdag@ (st)
-       ; this inc triggers interleaving
-       (inc
+     (lambda (st)
+       (suspend
          (let ((scope (subst-scope (state-S st))))
            (let ((x (var scope)) ...)
              (bind* (g0 st) g ...))))))))
 
-; -> Goal
+; (conde [g:Goal ...] ...+) -> Goal
 (define-syntax conde
   (syntax-rules ()
     ((_ (g0 g ...) (g1 g^ ...) ...)
-     (lambdag@ (st)
-       ; this inc triggers interleaving
-       (inc
+     (lambda (st)
+       (suspend
          (let ((st (state-with-scope st (new-scope))))
            (mplus*
              (bind* (g0 st) g ...)
@@ -368,12 +343,12 @@
   (syntax-rules ()
     ((_ n (q) g0 g ...)
      (take n
-       (inc
+       (suspend
          ((fresh (q) g0 g ...
-            (lambdag@ (st)
+            (lambda (st)
               (let ((st (state-with-scope st nonlocal-scope)))
                 (let ((z ((reify q) st)))
-                  (choice z (lambda () (lambda () #f)))))))
+                  (cons z (lambda () (lambda () #f)))))))
           empty-state))))
     ((_ n (q0 q1 q ...) g0 g ...)
      (run n (x)
@@ -409,7 +384,7 @@
 
 (define (apply-type-constraint tc)
   (lambda (u)
-    (lambdag@ (st)
+    (lambda (st)
       (let ((type-pred (type-constraint-predicate tc)))
         (let ((term (walk u (state-S st))))
           (cond
@@ -438,18 +413,14 @@
   (symbolo symbol? sym (lambda (s1 s2) (string<? (symbol->string s1)
                                                  (symbol->string s2)))))
 
-; Options:
-;   table mapping symbol -> predicate
-;   representation of type constraint as pair or struct of symbol and predicate
-;   store both
-
 (define (add-to-D st v d)
   (let* ((c (lookup-c st v))
          (c^ (c-with-D c (cons d (c-D c)))))
     (set-c st v c^)))
 
+; (ListOf Association) -> Goal
 (define (=/=* S+)
-  (lambdag@ (st)
+  (lambda (st)
     (let-values (((S added) (unify* S+ (subst-with-scope
                                          (state-S st)
                                          nonlocal-scope))))
@@ -472,7 +443,7 @@
 ;; Generalized 'absento': 'term1' can be any legal term (old version
 ;; of faster-miniKanren required 'term1' to be a ground atom).
 (define (absento term1 term2)
-  (lambdag@ (st)
+  (lambda (st)
     (let ((term1 (walk term1 (state-S st)))
           (term2 (walk term2 (state-S st))))
       (let ((st^ ((=/= term1 term2) st)))
@@ -501,7 +472,7 @@
       (and res (and-foldl proc res (cdr lst))))))
 
 (define (== u v)
-  (lambdag@ (st)
+  (lambda (st)
     (let-values (((S^ added) (unify u v (state-S st))))
       (if S^
         (and-foldl update-constraints (state S^ (state-C st)) added)
@@ -533,7 +504,7 @@
 (define-syntax project
   (syntax-rules ()
     ((_ (x ...) g g* ...)
-     (lambdag@ (st)
+     (lambda (st)
        (let ((x (walk* x (state-S st))) ...)
          ((fresh () g g* ...) st))))))
 
