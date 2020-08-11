@@ -7,6 +7,7 @@
 
 ; Creates a new scope that is not scope-eq? to any other scope
 (define (new-scope) (list 'scope))
+(define scope-eq? eq?)
 
 ; Scope used when variable bindings should always be made in the
 ; substitution, as in disequality solving and reification. We
@@ -14,7 +15,6 @@
 ; disequality constraint holds!
 (define nonlocal-scope (list 'non-local-scope))
 
-(define scope-eq? eq?)
 
 ; Logic variable object.
 ; Contains:
@@ -27,8 +27,11 @@
 ; Variable objects are compared by object identity.
 
 ; The unique val for variables that have not yet been bound
-; to a value or are bound in the substitution
+; to a value or are bound in the substitution. Also used
+; as the sentinal value for substitution and constraint store
+; lookup.
 (define unbound (list 'unbound))
+(define (unbound? v) (eq? v unbound))
 
 (define var
   (let ((counter -1))
@@ -38,22 +41,16 @@
 
 ; Vectors are not allowed as terms, so terms that are vectors
 ; are variables.
-(define (var? x)
-  (vector? x))
+(define (var? x) (vector? x))
 
 (define var-eq? eq?)
 
-(define (var-val x)
-  (vector-ref x 0))
+(define (var-val x)   (vector-ref x 0))
+(define (var-scope x) (vector-ref x 1))
+(define (var-idx x)   (vector-ref x 2))
 
 (define (set-var-val! x v)
   (vector-set! x 0 v))
-
-(define (var-scope x)
-  (vector-ref x 1))
-
-(define (var-idx x)
-  (vector-ref x 2))
 
 
 ; Substitution object.
@@ -78,7 +75,6 @@
   (cons mapping scope))
 
 (define subst-map car)
-
 (define subst-scope cdr)
 
 (define (subst-length S)
@@ -103,7 +99,7 @@
   ; set-var-val! optimization.
   ; Tried checking the scope here to avoid a subst-map-lookup
   ; if it was definitely unbound, but that was slower.
-  (if (not (eq? (var-val x) unbound))
+  (if (not (unbound? (var-val x)))
     (var-val x)
     (subst-map-lookup x (subst-map S))))
 
@@ -156,11 +152,11 @@
 
 (define (lookup-c st x)
   (let ((res (intmap-ref (state-C st) (var-idx x))))
-    (if (not (eq? unbound res))
-      res
-      empty-c)))
+    (if (unbound? res)
+      empty-c
+      res)))
 
-; t:unbind in mk-chez.scm either is buggy or doesn't do what I would expect, so
+; t:unbind in mk-vicare.scm either is buggy or doesn't do what I would expect, so
 ; I implement remove by setting the value to the empty constraint record.
 (define (remove-c x st)
   (state-with-C st (intmap-set (state-C st) (var-idx x) empty-c)))
@@ -188,35 +184,12 @@
 
 ; Unification
 
-(define (walk u S)
-  (if (var? u)
-    (let ((val (subst-lookup u S)))
-      (if (eq? val unbound)
-        u
-        (walk val S)))
-    u))
+; UnificationResult: (or/c (values Substitution (Listof Association))
+;                          (values #f #f)
+; An extended substitution and a list of associations added during the unification,
+;  or (values #f #f) indicating unification failed.
 
-(define (occurs-check x v S)
-  (let ((v (walk v S)))
-    (cond
-      ((var? v) (var-eq? v x))
-      ((pair? v)
-       (or (occurs-check x (car v) S)
-           (occurs-check x (cdr v) S)))
-      (else #f))))
-
-(define (ext-s-check x v S)
-  (if (occurs-check x v S)
-    (values #f #f)
-    (values (subst-add S x v) (list (cons x v)))))
-
-; Returns as values the extended substitution and a list of
-; associations added during the unification, or (values #f #f) if the
-; unification failed.
-;
-; Right now appends the list of added values from sub-unifications.
-; Alternatively could be threaded monadically, which could be faster
-; or slower.
+; Term, Term, Substitution -> UnificationResult
 (define (unify u v s)
   (let ((u (walk u s))
         (v (walk v s)))
@@ -228,10 +201,38 @@
        (let-values (((s added-car) (unify (car u) (car v) s)))
          (if s
            (let-values (((s added-cdr) (unify (cdr u) (cdr v) s)))
+             ; Right now appends the list of added values from sub-unifications.
+             ; Alternatively could be threaded monadically, which could be faster
+             ; or slower.
              (values s (append added-car added-cdr)))
            (values #f #f))))
       ((equal? u v) (values s '()))
       (else (values #f #f)))))
+
+; Term, Substitution -> Term
+(define (walk u S)
+  (if (var? u)
+    (let ((val (subst-lookup u S)))
+      (if (unbound? val)
+        u
+        (walk val S)))
+    u))
+
+; Var, Term, Substitution -> Boolean
+(define (occurs-check x v S)
+  (let ((v (walk v S)))
+    (cond
+      ((var? v) (var-eq? v x))
+      ((pair? v)
+       (or (occurs-check x (car v) S)
+           (occurs-check x (cdr v) S)))
+      (else #f))))
+
+; Var, Term, Substitution -> UnificationResult
+(define (ext-s-check x v S)
+  (if (occurs-check x v S)
+    (values #f #f)
+    (values (subst-add S x v) (list (cons x v)))))
 
 (define (unify* S+ S)
   (unify (map lhs S+) (map rhs S+) S))
@@ -267,9 +268,7 @@
          (else (let ((c (car stream)) (f (cdr stream)))
                  e3)))))))
 
-; stream: SearchStream
-;      f: SuspendedStream:
-; -> SearchStream
+; SearchStream, SuspendedStream -> SearchStream,
 ;
 ; f is a thunk to avoid unnecesarry computation in the case that the
 ; first answer produced by c-inf is enough to satisfy the query.
@@ -280,9 +279,7 @@
     ((c) (cons c f))
     ((c f^) (cons c (lambda () (mplus (f) f^))))))
 
-; stream: SearchStream
-;      g: Goal
-; -> SearchStream
+; SearchStream, Goal -> SearchStream
 (define (bind stream g)
   (case-inf stream
     (() #f)
@@ -365,23 +362,26 @@
 ; C refers to the constraint store map
 ; c refers to an individual constraint record
 
-; Constraint: State -> #f | State
+; Constraint: State -> (or/c #f State)
 ;
 ; (note that a Constraint is a Goal but a Goal is not a Constraint.
 ;  Constraint implementations currently use this more restrained type.
 ;  See `and-foldl` and `update-constraints`.)
 
-; Requirements for type constraints:
+; Invariants assumed for type constraints:
 ; 1. Must be positive, not negative. not-pairo wouldn't work.
 ; 2. Each type must have infinitely many possible values to avoid
 ;      incorrectness in combination with disequality constraints,
 ;      like: (fresh (x) (booleano x) (=/= x #t) (=/= x #f))
+; 3. Types must be disjoint from each other and from pairs.
 
 (define (type-constraint predicate reified)
   (list predicate reified))
+
 (define type-constraint-predicate car)
 (define type-constraint-reified cadr)
 
+; TypeConstraint -> (Term -> Goal)
 (define (apply-type-constraint tc)
   (lambda (u)
     (lambda (st)
@@ -428,39 +428,40 @@
         ((not S) st)
         ((null? added) #f)
         (else
-          ; Choose one of the disequality elements (el) to attach
-          ; the constraint to. Only need to choose one because
-          ; all must fail to cause the constraint to fail.
+          ; Attach the constraint to variables in of the disequality elements
+          ; (el).  We only need to choose one because all elements must fail to
+          ; cause the constraint to fail.
           (let ((el (car added)))
             (let ((st (add-to-D st (car el) added)))
               (if (var? (cdr el))
                 (add-to-D st (cdr el) added)
                 st))))))))
 
+; Term, Term -> Goal
 (define (=/= u v)
   (=/=* (list (cons u v))))
 
-;; Generalized 'absento': 'term1' can be any legal term (old version
-;; of faster-miniKanren required 'term1' to be a ground atom).
+; Term, Term -> Goal
+; Generalized 'absento': 'term1' can be any legal term (old version
+; of faster-miniKanren required 'term1' to be a ground atom).
 (define (absento term1 term2)
   (lambda (st)
     (let ((term1 (walk term1 (state-S st)))
           (term2 (walk term2 (state-S st))))
       (let ((st^ ((=/= term1 term2) st)))
-        (if st^
-          (cond
-            ((pair? term2)
-             (let ((st^^ ((absento term1 (car term2)) st^)))
-               (and st^^ ((absento term1 (cdr term2)) st^^))))
-            ((var? term2)
-             (let* ((c (lookup-c st^ term2))
-                    (A (c-A c)))
-               (if (memv term1 A)
-                 st^
-                 (let ((c^ (c-with-A c (cons term1 A))))
-                   (set-c st^ term2 c^)))))
-            (else st^))
-          #f)))))
+        (and st^
+             (cond
+               ((pair? term2)
+                (let ((st^^ ((absento term1 (car term2)) st^)))
+                  (and st^^ ((absento term1 (cdr term2)) st^^))))
+               ((var? term2)
+                (let* ((c (lookup-c st^ term2))
+                       (A (c-A c)))
+                  (if (memv term1 A)
+                    st^
+                    (let ((c^ (c-with-A c (cons term1 A))))
+                      (set-c st^ term2 c^)))))
+               (else st^)))))))
 
 ; Fold lst with proc and initial value init. If proc ever returns #f,
 ; return with #f immediately. Used for applying a series of
@@ -618,7 +619,7 @@
 (define (absento-rhs-atomic? c a)
   ; absento on pairs is pushed down and type constraints are atomic,
   ; so the only kind of non-atomic RHS is an untyped var.
-  (not (and (var? (rhs a)) (eq? unbound (var-type c (rhs a))))))
+  (not (and (var? (rhs a)) (unbound? (var-type c (rhs a))))))
 
 ; Drop absento constraints that are trivially satisfied because
 ; any violation would cause a failure of the occurs check.
@@ -644,9 +645,9 @@
           d))
 
 (define (var-types-match? c t1 t2)
-  (or (eq? unbound (var-type c t1))
+  (or (unbound? (var-type c t1))
       (if (var? t2)
-        (or (eq? unbound (var-type c t2))
+        (or ( unbound? (var-type c t2))
             (eq? (var-type c t1) (var-type c t2)))
         ((type-constraint-predicate (var-type c t1))
          t2))))
@@ -731,7 +732,7 @@
                           (map
                             (lambda (v)
                               (let ((tc (subst-map-lookup v T)))
-                                (and (not (eq? tc unbound))
+                                (and (not (unbound? tc))
                                      (eq? tc-type (type-constraint-reified tc))
                                      (walk* v R))))
                             (remove-duplicates vs)))))
