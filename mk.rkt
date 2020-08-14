@@ -10,7 +10,8 @@
          symbolo numbero stringo
          absento
          project
-         var?)
+         var?
+         always-wrap-reified?)
 
 (define empty-intmap (hasheq))
 (define (intmap-count m) (hash-count m))

@@ -1,3 +1,5 @@
+(define always-wrap-reified? (make-parameter #f))
+
 ; Scope object.
 ; Used to determine whether a branch has occured between variable
 ; creation and unification to allow the set-var-val! optimization
@@ -715,7 +717,7 @@
                 (let ((fa (drop-dot fa)))
                   `((absento . ,fa))))))
       (cond
-        ((and (null? fd) (null? ft) (null? fa))
+        ((and (null? fd) (null? ft) (null? fa) (not (always-wrap-reified?)))
          v)
         (else (append `(,v) fd ft fa))))))
 
