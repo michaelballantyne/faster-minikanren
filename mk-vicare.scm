@@ -107,3 +107,6 @@
            (f (car seq) init)
            (cdr seq))))
 
+(define (filter-map f l) (filter (lambda (x) x) (map f l)))
+
+(define (append* l*) (apply append l*))
