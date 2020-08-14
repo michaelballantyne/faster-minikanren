@@ -197,6 +197,10 @@
         (v (walk v s)))
     (cond
       ((eq? u v) (values s '()))
+      ((and (var? u) (var? v))
+       (if (> (var-idx u) (var-idx v))
+         (ext-s-check u v s)
+         (ext-s-check v u s)))
       ((var? u) (ext-s-check u v s))
       ((var? v) (ext-s-check v u s))
       ((and (pair? u) (pair? v))
@@ -213,12 +217,13 @@
 
 ; Term, Substitution -> Term
 (define (walk u S)
-  (if (var? u)
-    (let ((val (subst-lookup u S)))
-      (if (unbound? val)
-        u
-        (walk val S)))
-    u))
+  (let rec ((u u))
+    (if (var? u)
+      (let ((val (subst-lookup u S)))
+        (if (unbound? val)
+          u
+          (rec val)))
+      u)))
 
 ; Var, Term, Substitution -> Boolean
 (define (occurs-check x v S)
@@ -342,13 +347,13 @@
   (syntax-rules ()
     ((_ n (q) g0 g ...)
      (take n
-       (suspend
-         ((fresh (q) g0 g ...
-            (lambda (st)
-              (let ((st (state-with-scope st nonlocal-scope)))
-                (let ((z ((reify q) st)))
-                  (cons z (lambda () (lambda () #f)))))))
-          empty-state))))
+           (suspend
+             ((fresh (q) g0 g ...
+                     (lambda (st)
+                       (let ((st (state-with-scope st nonlocal-scope)))
+                         (let ((z ((reify q) st)))
+                           (cons z (lambda () (lambda () #f)))))))
+              empty-state))))
     ((_ n (q0 q1 q ...) g0 g ...)
      (run n (x)
        (fresh (q0 q1 q ...)
