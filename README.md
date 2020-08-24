@@ -96,7 +96,7 @@ Using a log-time persistent map seems to be better than an association list when
 
 Plenty of other miniKanren use log-time persistent maps for their substitutions; core.logic (https://github.com/clojure/core.logic) and veneer (https://github.com/tca/veneer) certainly do.
 
-These particular data structure choices may not be optimal; we haven't recently evaluated a broad array of map types. There's a paper on it concluding that skew binary random access lists might be the best: https://www.cs.indiana.edu/~lkuper/papers/walk.pdf
+These particular data structure choices may not be optimal; we haven't recently evaluated a broad array of map types. There's a paper on it concluding that skew binary random access lists might be the best: https://users.soe.ucsc.edu/~lkuper/papers/walk.pdf
 
 ### set-var-val!
 
