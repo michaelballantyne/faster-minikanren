@@ -794,7 +794,3 @@
         (if (eq? x-ti y-ti)
           ((type-constraint-ordering (list-ref type-constraints x-ti)) x y)
           (number-compare x-ti y-ti))))))
-
-(define (datum->string x)
-  (call-with-string-output-port
-    (lambda (p) (write x p))))
