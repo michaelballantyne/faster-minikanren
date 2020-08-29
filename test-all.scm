@@ -12,6 +12,9 @@
 (printf "symbolo-numbero-tests\n")
 (load "symbolo-numbero-tests.scm")
 
+(printf "stringo-tests.scm\n")
+(load "stringo-tests.scm")
+
 (printf "disequality-tests\n")
 (load "disequality-tests.scm")
 
