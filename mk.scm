@@ -382,11 +382,12 @@
 ;      like: (fresh (x) (booleano x) (=/= x #t) (=/= x #f))
 ; 3. Types must be disjoint from each other and from pairs.
 
-(define (type-constraint predicate reified)
-  (list predicate reified))
+(define (type-constraint predicate reified ordering)
+  (list predicate reified ordering))
 
 (define type-constraint-predicate car)
 (define type-constraint-reified cadr)
+(define type-constraint-ordering caddr)
 
 ; TypeConstraint -> (Term -> Goal)
 (define (apply-type-constraint tc)
@@ -409,16 +410,20 @@
   (syntax-rules ()
     ((_ tc-list (name predicate reified ordering) ...)
      (begin
-       (define tc-list (list (type-constraint predicate 'reified) ...))
+       (define tc-list (list (type-constraint predicate 'reified ordering) ...))
        (define-values
          (name ...)
          (apply values (map apply-type-constraint tc-list)))))))
 
+; CompareResult: (or '< '> '=)
+(define (number-compare a b) (cond ((= a b) '=) ((< a b) '<) (else '>)))
+(define (string-compare a b) (cond ((string=? a b) '=) ((string<? a b) '<) (else '>)))
+(define (symbol-compare a b) (string-compare (symbol->string a) (symbol->string b)))
+
 (declare-type-constraints type-constraints
-  (numbero number? num <=)
-  (stringo string? str string<=?)
-  (symbolo symbol? sym (lambda (s1 s2) (string<? (symbol->string s1)
-                                                 (symbol->string s2)))))
+  (numbero number? num number-compare)
+  (stringo string? str string-compare)
+  (symbolo symbol? sym symbol-compare))
 
 (define (add-to-D st v d)
   (let* ((c (lookup-c st v))
@@ -738,16 +743,19 @@
       (lex<=? (car x) (car y)))
     (map sort-pr d)))
 
+(define (symbol<? a b) (string<? (symbol->string a) (symbol->string b)))
+
 (define (sort-pr pr)
   (let ((l (lhs pr)) (r (rhs pr)))
     (cond
-      ((lex<-reified-name? r) pr)
-      ((lex<=? r l) `(,r . ,l))
+      ((not (reified-var? r)) pr)
+      ((symbol<? r l) `(,r . ,l))
       (else pr))))
 
-(define (lex<-reified-name? r)
-  (char<? (string-ref (datum->string r) 0)
-          #\_))
+(define (reified-var? r)
+  (and (symbol? r)
+       (char=? (string-ref (symbol->string r) 0)
+               #\_)))
 
 (define (drop-dot-D D)
   (map drop-dot D))
@@ -756,10 +764,36 @@
   (map (lambda (t) (list (lhs t) (rhs t)))
        X))
 
+(define (type-index v)
+  (let loop ((l type-constraints)
+             (i 0))
+    (if (null? l)
+      (error 'type-index "no matching type constraint" v)
+      (let ((tc (car l)))
+        (if ((type-constraint-predicate tc) v)
+          i
+          (loop (cdr l) (+ i 1)))))))
+
 (define (lex<=? x y)
-  ; TODO: order by type of value; possibly using order in
-  ; declare-type-constraints?
-  (string<=? (datum->string x) (datum->string y)))
+  (member (lex-compare x y) '(< =)))
+
+; (Term, Term) -> (or CompareResult error)
+; defined when arguments are pairs or atomic types addressed by type-constraints
+(define (lex-compare x y)
+  (cond
+    ((and (pair? x) (pair? y))
+     (let ((r (lex-compare (car x) (car y))))
+       (if (eq? r '=)
+         (lex-compare (cdr x) (cdr y))
+         r)))
+    ((pair? x) '>)
+    ((pair? y) '<)
+    (else ; both atomic
+      (let ((x-ti (type-index x))
+            (y-ti (type-index y)))
+        (if (eq? x-ti y-ti)
+          ((type-constraint-ordering (list-ref type-constraints x-ti)) x y)
+          (number-compare x-ti y-ti))))))
 
 (define (datum->string x)
   (call-with-string-output-port
