@@ -595,7 +595,7 @@
 (define reify
   (lambda (x)
     (lambda (st)
-      (let* ((L (walk* (state-L st) (state-S st)))
+      (let* ((L (walk-lift (state-L st) (state-S st)))
              (x (if (null? L) x (list x '!! L)))
              (c (c-from-st st x)))
         (let ((c (cycle c)))
