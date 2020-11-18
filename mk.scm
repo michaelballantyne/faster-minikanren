@@ -768,7 +768,7 @@
   (let loop ((l type-constraints)
              (i 0))
     (if (null? l)
-      (error 'type-index "no matching type constraint" v)
+      (error 'type-index "no matching type constraint ~s" v)
       (let ((tc (car l)))
         (if ((type-constraint-predicate tc) v)
           i
