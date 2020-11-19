@@ -768,7 +768,7 @@
   (let loop ((l type-constraints)
              (i 0))
     (if (null? l)
-      (error 'type-index "no matching type constraint ~s" v)
+      (error 'type-index "no matching type constraint" v)
       (let ((tc (car l)))
         (if ((type-constraint-predicate tc) v)
           i
@@ -778,7 +778,7 @@
   (member (lex-compare x y) '(< =)))
 
 ; (Term, Term) -> (or CompareResult error)
-; defined when arguments are pairs or atomic types addressed by type-constraints
+; defined when arguments are pairs, null, or atomic types addressed by type-constraints
 (define (lex-compare x y)
   (cond
     ((and (pair? x) (pair? y))
@@ -786,8 +786,8 @@
        (if (eq? r '=)
          (lex-compare (cdr x) (cdr y))
          r)))
-    ((pair? x) '>)
-    ((pair? y) '<)
+    ((or (null? x) (pair? x)) '>)
+    ((or (null? y) (pair? y)) '<)
     (else ; both atomic
       (let ((x-ti (type-index x))
             (y-ti (type-index y)))
