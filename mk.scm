@@ -382,6 +382,11 @@
 ;      like: (fresh (x) (booleano x) (=/= x #t) (=/= x #f))
 ; 3. Types must be disjoint from each other and from pairs.
 
+; Predicate: Any -> (or #f Any)
+; CompareResult: (or '< '> '=)
+; Ordering: T, T -> CompareResult where T is defined by the corresponding predicate.
+
+; Predicate Symbol CompareResult -> TypeConstraint
 (define (type-constraint predicate reified ordering)
   (list predicate reified ordering))
 
@@ -415,7 +420,7 @@
          (name ...)
          (apply values (map apply-type-constraint tc-list)))))))
 
-; CompareResult: (or '< '> '=)
+; Orderings
 (define (number-compare a b) (cond ((= a b) '=) ((< a b) '<) (else '>)))
 (define (string-compare a b) (cond ((string=? a b) '=) ((string<? a b) '<) (else '>)))
 (define (symbol-compare a b) (string-compare (symbol->string a) (symbol->string b)))
@@ -764,33 +769,44 @@
   (map (lambda (t) (list (lhs t) (rhs t)))
        X))
 
-(define (type-index v)
-  (let loop ((l type-constraints)
+; (Listof (Pair Predicate Ordering))
+(define type-orderings
+  (append
+    ; atomic types
+    (map (lambda (tc) (cons (type-constraint-predicate tc)
+                            (type-constraint-ordering tc)))
+         type-constraints)
+    ; lists
+    `((,null? . ,(lambda (x y) '=))
+      (,pair? . ,(lambda (x y)
+                   (let ((r (lex-compare (car x) (car y))))
+                     (if (eq? r '=)
+                       (lex-compare (cdr x) (cdr y))
+                       r)))))))
+
+(define (index+element-where l pred)
+  (let loop ((l l)
              (i 0))
-    (if (null? l)
-      (error 'type-index "no matching type constraint" v)
-      (let ((tc (car l)))
-        (if ((type-constraint-predicate tc) v)
-          i
-          (loop (cdr l) (+ i 1)))))))
+    (cond
+      [(null? l)      (values #f #f)]
+      [(pred (car l)) (values i (car l))]
+      [else           (loop (cdr l) (+ i 1))])))
+
+(define (type-ordering v)
+  (let-values ([(idx pr) (index+element-where type-orderings (lambda (pr) ((lhs pr) v)))])
+    (if idx
+      (values idx (rhs pr))
+      (error 'type-index "missing ordering for type of value ~s" v))))
+
+; (Term, Term) -> (or CompareResult error)
+; defined when arguments are pairs, null, or atomic types addressed by type-constraints;
+; see type-orderings.
+(define (lex-compare x y)
+  (let-values (((x-o-idx x-o) (type-ordering x))
+               ((y-o-idx y-o) (type-ordering y)))
+    (if (eqv? x-o-idx y-o-idx)
+      (x-o x y)
+      (number-compare x-o-idx y-o-idx))))
 
 (define (lex<=? x y)
   (member (lex-compare x y) '(< =)))
-
-; (Term, Term) -> (or CompareResult error)
-; defined when arguments are pairs, null, or atomic types addressed by type-constraints
-(define (lex-compare x y)
-  (cond
-    ((and (pair? x) (pair? y))
-     (let ((r (lex-compare (car x) (car y))))
-       (if (eq? r '=)
-         (lex-compare (cdr x) (cdr y))
-         r)))
-    ((or (null? x) (pair? x)) '>)
-    ((or (null? y) (pair? y)) '<)
-    (else ; both atomic
-      (let ((x-ti (type-index x))
-            (y-ti (type-index y)))
-        (if (eq? x-ti y-ti)
-          ((type-constraint-ordering (list-ref type-constraints x-ti)) x y)
-          (number-compare x-ti y-ti))))))

@@ -461,8 +461,11 @@
        (== d '(1 . 3)))
   '((_.0 _.1 (1 . 2) (1 . 3))))
 
-(test "reification of constants lexes properly"
+(test "null, pair, and atomic types order correctly in =/= reification"
   (run 1 (q)
-       (=/= q '())
-       (=/= q 'a))
-  '((_.0 (=/= ((_.0 a)) ((_.0 ()))))))
+    (=/= q '())
+    (=/= q '(foo))
+    (=/= q 5))
+  '((_.0 (=/= ((_.0 5))
+              ((_.0 ()))
+              ((_.0 (foo)))))))

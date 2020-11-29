@@ -671,4 +671,11 @@
    '(((_.0 _.1 _.2) (num _.1) (sym _.0) (absento (_.0 _.2))))
    )
 
- 
+(test "null, pair, and atomic types order correctly in absento reification"
+  (run 1 (q)
+    (absento '(a . b) q)
+    (absento '() q)
+    (absento 5 q))
+  '((_.0 (absento (5 _.0)
+                  (() _.0)
+                  ((a . b) _.0)))))
