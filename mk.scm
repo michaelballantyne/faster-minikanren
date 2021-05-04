@@ -1161,26 +1161,33 @@
       ,move-T-to-D-b/c-t2-atom ,split-t-move-to-d-b/c-pair
       ,drop-from-D-b/c-T ,drop-t-b/c-t2-occurs-t1)))
 
-(define fix-l==
+(define do-expand
   (lambda (t)
-    (if (and (pair? t)
-             (or (eq? '== (car t))
-                 (eq? '=/= (car t))))
-        (list (car t) (quasi (cadr t)) (quasi (caddr t)))
-        t)))
+    (cond
+      ((and (pair? t) (eq? 'expand (car t)))
+       (quasi (cadr t)))
+      ((pair? t) (map do-expand t))
+      (else t))))
+
+(define (expand x)
+  `(expand ,x))
+
+(define (unexpand x)
+  `(unexpand ,x))
 
 (define quasi
   (lambda (t)
     (cond
       ((var? t) t)
       ((and (pair? t) (eq? (car t) 'sym)) (cdr t))
+      ((and (pair? t) (eq? (car t) 'unexpand)) (cadr t))
       ((pair? t) (list 'cons (quasi (car t)) (quasi (cdr t))))
       ((null? t) ''())
       (else (list 'quote t)))))
 
 (define walk-lift
   (lambda (L S)
-    (map fix-l== (walk* (reverse L) S))))
+    (do-expand (walk* (reverse L) S))))
 
 (define lift
   (lambda (x)
@@ -1197,4 +1204,5 @@
             (== out (walk-lift (state-L st2) (state-S st2))))
           st))))))
 
-(define l== (lambda (e1 e2) (fresh () (lift `(== ,e1 ,e2)))))
+(define l== (lambda (e1 e2) (fresh () (lift `(== ,(expand e1) ,(expand e2))))))
+(define l=/= (lambda (e1 e2) (fresh () (lift `(=/= ,(expand e1) ,(expand e2))))))
