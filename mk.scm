@@ -1166,7 +1166,7 @@
     (cond
       ((and (pair? t) (eq? 'expand (car t)))
        (quasi (cadr t)))
-      ((pair? t) (map do-expand t))
+      ((pair? t) (cons (do-expand (car t)) (do-expand (cdr t))))
       (else t))))
 
 (define (expand x)
