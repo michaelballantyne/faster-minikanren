@@ -1051,7 +1051,11 @@
           ((and (null? fd) (null? fy)
                 (null? fn) (null? ft))
            v)
-          (else (append `(,v) fd fn fy ft)))))))
+          (else (if (and (pair? v)
+                         (pair? (cdr v))
+                         (eq? '!! (cadr v)))
+                    `(,v $$ ,@fd ,@fn ,@fy ,@ft)
+                    (append `(,v) fd fn fy ft))))))))
 
 (define sort-D
   (lambda (D)
