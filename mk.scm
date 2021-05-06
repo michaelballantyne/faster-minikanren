@@ -1183,7 +1183,6 @@
   (lambda (t)
     (cond
       ((var? t) t)
-      ((and (pair? t) (eq? (car t) 'sym)) (cdr t))
       ((and (pair? t) (eq? (car t) 'unexpand)) (cadr t))
       ((pair? t) (list 'cons (quasi (car t)) (quasi (cdr t))))
       ((null? t) ''())
