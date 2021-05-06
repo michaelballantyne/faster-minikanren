@@ -1168,22 +1168,27 @@
 (define do-expand
   (lambda (t)
     (cond
-      ((and (pair? t) (eq? 'expand (car t)))
-       (quasi (cadr t)))
+      ((expand? t) (quasi (cadr t)))
       ((pair? t) (cons (do-expand (car t)) (do-expand (cdr t))))
       (else t))))
 
+(define expand-tag (gensym "expand"))
 (define (expand x)
-  `(expand ,x))
+  (list expand-tag x))
+(define (expand? x)
+  (and (pair? x) (eq? expand-tag (car x))))
 
+(define unexpand-tag (gensym "unexpand"))
 (define (unexpand x)
-  `(unexpand ,x))
+  (list unexpand-tag x))
+(define (unexpand? x)
+  (and (pair? x) (eq? unexpand-tag (car x))))
 
 (define quasi
   (lambda (t)
     (cond
       ((var? t) t)
-      ((and (pair? t) (eq? (car t) 'unexpand)) (cadr t))
+      ((unexpand? t) (cadr t))
       ((pair? t) (list 'cons (quasi (car t)) (quasi (cdr t))))
       ((null? t) ''())
       (else (list 'quote t)))))
