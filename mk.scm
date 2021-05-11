@@ -776,8 +776,11 @@
     (map (lambda (tc) (cons (type-constraint-predicate tc)
                             (type-constraint-ordering tc)))
          type-constraints)
-    ; lists
-    `((,null? . ,(lambda (x y) '=))
+    `(; booleans
+      (,(lambda (v) (eq? v #t)) . ,(lambda (x y) '=))
+      (,(lambda (v) (eq? v #f)) . ,(lambda (x y) '=))
+      ; lists
+      (,null? . ,(lambda (x y) '=))
       (,pair? . ,(lambda (x y)
                    (let ((r (lex-compare (car x) (car y))))
                      (if (eq? r '=)
