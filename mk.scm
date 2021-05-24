@@ -595,7 +595,7 @@
 (define reify
   (lambda (x)
     (lambda (st)
-      (let* ((L (walk-lift (state-L st) (state-S st)))
+      (let* ((L (walk-lift-final (state-L st) (state-S st)))
              (x (if (null? L) x (list x '!! L)))
              (c (c-from-st st x)))
         (let ((c (cycle c)))
@@ -1184,14 +1184,18 @@
   (lambda (t)
     (cond
       ((var? t) t)
-      ((unexpand? t) (cadr t))
+      ((unexpand? t) (do-expand (cadr t)))
       ((pair? t) (list 'cons (quasi (car t)) (quasi (cdr t))))
       ((null? t) ''())
       (else (list 'quote t)))))
 
 (define walk-lift
   (lambda (L S)
-    (do-expand (walk* (reverse L) S))))
+    (walk* (reverse L) S)))
+
+(define walk-lift-final
+  (lambda (L S)
+    (do-expand (walk-lift L S))))
 
 (define lift
   (lambda (x)
