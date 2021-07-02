@@ -8,8 +8,7 @@
 (define (eval-expo expr env val)
   (conde
     ((== `(quote ,val) expr)
-     (absento 'closure val)
-     (absento 'prim val)
+     (absent-tago val)
      (not-in-envo 'quote env))
 
     ((numbero expr) (== expr val))
@@ -25,7 +24,7 @@
          ;; Multi-argument
          ((list-of-symbolso x)))
        (not-in-envo 'lambda env)))
-    
+
     ((fresh (rator x rands body env^ a* res)
        (== `(,rator . ,rands) expr)
        ;; variadic
@@ -48,7 +47,7 @@
        (eval-expo rator env `(prim . ,prim-id))
        (eval-primo prim-id a* val)
        (eval-listo rands env a*)))
-    
+
     ((handle-matcho expr env val))
 
     ((fresh (p-name x body letrec-body)
@@ -65,9 +64,9 @@
        (eval-expo letrec-body
                   `((,p-name . (rec . (lambda ,x ,body))) . ,env)
                   val)))
-    
+
     ((prim-expo expr env val))
-    
+
     ))
 
 (define empty-env '())
@@ -132,11 +131,11 @@
     [(== prim-id 'car)
      (fresh (d)
        (== `((,val . ,d)) a*)
-       (=/= 'closure val))]
+       (not-tago val))]
     [(== prim-id 'cdr)
      (fresh (a)
        (== `((,a . ,val)) a*)
-       (=/= 'closure a))]
+       (not-tago a))]
     [(== prim-id 'not)
      (fresh (b)
        (== `(,b) a*)
@@ -241,6 +240,16 @@
                       (cdr . (val . (prim . cdr)))
                       . ,empty-env))
 
+(define (not-tago val)
+  (fresh ()
+    (=/= 'closure val)
+    (=/= 'prim val)))
+
+(define (absent-tago val)
+  (fresh ()
+    (absento 'closure val)
+    (absento 'prim val)))
+
 (define handle-matcho
   (lambda  (expr env val)
     (fresh (against-expr mval clause clauses)
@@ -275,7 +284,7 @@
 (define (literalo t)
   (conde
     ((numbero t))
-    ((symbolo t) (=/= 'closure t))
+    ((symbolo t) (not-tago t))
     ((booleano t))
     ((== '() t))))
 
@@ -306,7 +315,7 @@
 (define (var-p-match var mval penv penv-out)
   (fresh (val)
     (symbolo var)
-    (=/= 'closure mval)
+    (not-tago mval)
     (conde
       ((== mval val)
        (== penv penv-out)
@@ -386,7 +395,7 @@
      (literalo quasi-p))
     ((fresh (p)
        (== (list 'unquote p) quasi-p)
-       (=/= 'closure mval)
+       (not-tago mval)
        (p-no-match p mval penv penv-out)))
     ((fresh (a d)
        (== `(,a . ,d) quasi-p)
