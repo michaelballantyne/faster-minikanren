@@ -25,7 +25,7 @@
          ;; Multi-argument
          ((list-of-symbolso x)))
        (not-in-envo 'lambda env)))
-    
+
     ((fresh (rator x rands body env^ a* res)
        (== `(,rator . ,rands) expr)
        ;; variadic
@@ -48,7 +48,7 @@
        (eval-expo rator env `(prim . ,prim-id))
        (eval-primo prim-id a* val)
        (eval-listo rands env a*)))
-    
+
     ((handle-matcho expr env val))
 
     ((fresh (p-name x body letrec-body)
@@ -65,9 +65,9 @@
        (eval-expo letrec-body
                   `((,p-name . (rec . (lambda ,x ,body))) . ,env)
                   val)))
-    
+
     ((prim-expo expr env val))
-    
+
     ))
 
 (define empty-env '())
@@ -132,11 +132,13 @@
     [(== prim-id 'car)
      (fresh (d)
        (== `((,val . ,d)) a*)
-       (=/= 'closure val))]
+       (=/= 'closure val)
+       (=/= 'prim val))]
     [(== prim-id 'cdr)
      (fresh (a)
        (== `((,a . ,val)) a*)
-       (=/= 'closure a))]
+       (=/= 'closure a)
+       (=/= 'prim a))]
     [(== prim-id 'not)
      (fresh (b)
        (== `(,b) a*)
@@ -275,7 +277,7 @@
 (define (literalo t)
   (conde
     ((numbero t))
-    ((symbolo t) (=/= 'closure t))
+    ((symbolo t) (=/= 'closure t) (=/= 'prim t))
     ((booleano t))
     ((== '() t))))
 
@@ -307,6 +309,7 @@
   (fresh (val)
     (symbolo var)
     (=/= 'closure mval)
+    (=/= 'prim mval)
     (conde
       ((== mval val)
        (== penv penv-out)
@@ -387,6 +390,7 @@
     ((fresh (p)
        (== (list 'unquote p) quasi-p)
        (=/= 'closure mval)
+       (=/= 'prim mval)
        (p-no-match p mval penv penv-out)))
     ((fresh (a d)
        (== `(,a . ,d) quasi-p)
