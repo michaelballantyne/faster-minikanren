@@ -2,7 +2,7 @@
 
 (define (plus-staging t l)
   (if (staging-time?)
-      (fresh () (t) (later l))
+      (lambdag@ (st) (bind* ((t) st) (later l)))
       (t)))
 
 (define (symbolo x) (plus-staging (lambda () (symbolo-dyn x)) `(symbolo ,(expand x))))
