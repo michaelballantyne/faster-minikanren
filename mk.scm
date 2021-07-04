@@ -1,15 +1,3 @@
-(define staging-time? (make-parameter #f))
-
-(define (plus-staging t l)
-  (if (staging-time?)
-      (lambdag@ (st) (bind* ((t) st) (later l)))
-      (t)))
-
-(define (symbolo x) (plus-staging (lambda () (symbolo-dyn x)) `(symbolo ,(expand x))))
-(define (numbero x) (plus-staging (lambda () (numbero-dyn x)) `(numbero ,(expand x))))
-(define (absento x y) (plus-staging (lambda () (absento-dyn x y)) `(absento ,(expand x) ,(expand y))))
-(define (=/= x y) (plus-staging (lambda () (=/=-dyn x y)) `(=/= ,(expand x) ,(expand y))))
-
 ; Scope object.
 ; Used to determine whether a branch has occured between variable
 ; creation and unification to allow the set-var-val! optimization
@@ -1226,3 +1214,15 @@
 
 (define l== (lambda (e1 e2) (fresh () (later `(== ,(expand e1) ,(expand e2))))))
 (define l=/= (lambda (e1 e2) (fresh () (later `(=/= ,(expand e1) ,(expand e2))))))
+
+(define staging-time? (make-parameter #f))
+
+(define (plus-staging t l)
+  (if (staging-time?)
+      (lambdag@ (st) (bind* ((t) st) (later l)))
+      (t)))
+
+(define (symbolo x) (plus-staging (lambda () (symbolo-dyn x)) `(symbolo ,(expand x))))
+(define (numbero x) (plus-staging (lambda () (numbero-dyn x)) `(numbero ,(expand x))))
+(define (absento x y) (plus-staging (lambda () (absento-dyn x y)) `(absento ,(expand x) ,(expand y))))
+(define (=/= x y) (plus-staging (lambda () (=/=-dyn x y)) `(=/= ,(expand x) ,(expand y))))
