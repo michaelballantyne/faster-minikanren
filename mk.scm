@@ -1,3 +1,15 @@
+(define staging-time? (make-parameter #f))
+
+(define (plus-staging t l)
+  (if (staging-time?)
+      (fresh () (t) (later l))
+      (t)))
+
+(define (symbolo x) (plus-staging (lambda () (symbolo-dyn x)) `(symbolo ,(expand x))))
+(define (numbero x) (plus-staging (lambda () (numbero-dyn x)) `(numbero ,(expand x))))
+(define (absento x y) (plus-staging (lambda () (absento-dyn x y)) `(absento ,(expand x) ,(expand y))))
+(define (=/= x y) (plus-staging (lambda () (=/=-dyn x y)) `(=/= ,(expand x) ,(expand y))))
+
 ; Scope object.
 ; Used to determine whether a branch has occured between variable
 ; creation and unification to allow the set-var-val! optimization
@@ -439,8 +451,8 @@
                  (else #f))))
             (else #f)))))))
 
-(define symbolo (type-constraint symbol? 'symbolo))
-(define numbero (type-constraint number? 'numbero))
+(define symbolo-dyn (type-constraint symbol? 'symbolo))
+(define numbero-dyn (type-constraint number? 'numbero))
 
 (define (add-to-D st v d)
   (let* ((c (lookup-c v st))
@@ -466,13 +478,13 @@
                   (add-to-D st (cdr el) added)
                   st)))))))))
 
-(define =/=
+(define =/=-dyn
   (lambda (u v)
     (=/=* `((,u . ,v)))))
 
 ;; Generalized 'absento': 'term1' can be any legal term (old version
 ;; of faster-miniKanren required 'term1' to be a ground atom).
-(define absento
+(define absento-dyn
   (lambda (term1 term2)
     (lambdag@ (st)
       (let ((state (state-S st)))
