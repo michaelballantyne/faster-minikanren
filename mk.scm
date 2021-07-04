@@ -595,7 +595,7 @@
 (define reify
   (lambda (x)
     (lambda (st)
-      (let* ((L (walk-lift-final (state-L st) (state-S st)))
+      (let* ((L (walk-later-final (state-L st) (state-S st)))
              (x (if (null? L) x (list x '!! L)))
              (c (c-from-st st x)))
         (let ((c (cycle c)))
@@ -1189,28 +1189,28 @@
       ((null? t) ''())
       (else (list 'quote t)))))
 
-(define walk-lift
+(define walk-later
   (lambda (L S)
     (walk* (reverse L) S)))
 
-(define walk-lift-final
+(define walk-later-final
   (lambda (L S)
-    (do-expand (walk-lift L S))))
+    (do-expand (walk-later L S))))
 
-(define lift
+(define later
   (lambda (x)
     (lambdag@ (st)
       (state (state-S st) (state-C st) (cons x (state-L st))))))
 
-(define lift-scope
+(define later-scope
   (lambda (g out)
     (lambdag@ (st)
       (bind*
        (g (state (state-S st) (state-C st) '()))
        (lambdag@ (st2)
          ((fresh ()
-            (== out (walk-lift (state-L st2) (state-S st2))))
+            (== out (walk-later (state-L st2) (state-S st2))))
           st))))))
 
-(define l== (lambda (e1 e2) (fresh () (lift `(== ,(expand e1) ,(expand e2))))))
-(define l=/= (lambda (e1 e2) (fresh () (lift `(=/= ,(expand e1) ,(expand e2))))))
+(define l== (lambda (e1 e2) (fresh () (later `(== ,(expand e1) ,(expand e2))))))
+(define l=/= (lambda (e1 e2) (fresh () (later `(=/= ,(expand e1) ,(expand e2))))))
