@@ -1246,27 +1246,26 @@
             (== out (walk-later (state-L st2) (state-S st2))))
           st))))))
 
-(define (generate-var-constraints v st)
-  (let ([c (lookup-c st v)])
-    (if (eq? c empty-c)
+(define (generate-var-constraints st)
+  (lambda (v)
+    (let ([c (lookup-c st v)])
+      (if (eq? c empty-c)
         st
-        (let ([new-cs-stx (append
-                       (if (eq? (c-T c) 'symbolo)
-                           (list `(symbolo ,v))
-                           '())
-                       (if (eq? (c-T c) 'numbero)
-                           (list `(numbero ,v))
-                           '())
-                       (map (lambda (atom) `(absento ,(expand atom) ,v)) (c-A c))
-                       (map (lambda (d) `(=/=* ,(expand d))) (c-D c)))])
-          (foldl (lambda (c-stx st) ((later c-stx) st)) st new-cs-stx)))))
-          
+        (append
+          (if (eq? (c-T c) 'symbolo)
+            (list `(symbolo ,v))
+            '())
+          (if (eq? (c-T c) 'numbero)
+            (list `(numbero ,v))
+            '())
+          (map (lambda (atom) `(absento ,(expand atom) ,v)) (c-A c))
+          (map (lambda (d) `(=/=* ,(expand d))) (c-D c)))))))
+
 (define generate-constraints
   (lambdag@ (st)
-     (let* ([vars (remove-duplicates (C-vars (state-C st)))])
-       (foldl generate-var-constraints
-              st
-              vars))))
+     (let* ([vars (remove-duplicates (C-vars (state-C st)))]
+            [new-stx (apply append (map (generate-var-constraints st) vars))])
+       (state (state-S st) (state-C st) (append (state-L st) (reverse new-stx))))))
 
 (define l== (lambda (e1 e2) (fresh () (later `(== ,(expand e1) ,(expand e2))))))
 (define l=/= (lambda (e1 e2) (fresh () (later `(=/= ,(expand e1) ,(expand e2))))))
