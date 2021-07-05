@@ -182,15 +182,18 @@
 ; are always on the representative element and must be moved / merged
 ; when that element changes.
 
-(define empty-C empty-intmap)
+(define C-vars car)
+(define C-map cdr)
+(define empty-C (cons '() empty-intmap))
 
 (define (set-c st x c)
   (state-with-C
     st
-    (intmap-set (state-C st) (var-idx x) c)))
+    (cons (cons x (C-vars (state-C st)))
+          (intmap-set (C-map (state-C st)) (var-idx x) c))))
 
 (define (lookup-c st x)
-  (let ((res (intmap-ref (state-C st) (var-idx x))))
+  (let ((res (intmap-ref (C-map (state-C st)) (var-idx x))))
     (if (unbound? res)
       empty-c
       res)))
@@ -198,8 +201,10 @@
 ; t:unbind in mk-vicare.scm either is buggy or doesn't do what I would expect, so
 ; I implement remove by setting the value to the empty constraint record.
 (define (remove-c x st)
-  (state-with-C st (intmap-set (state-C st) (var-idx x) empty-c)))
+  (set-c st x empty-c))
 
+(define (C-new-layer C)
+  (cons '() (C-map C)))
 
 ; State object.
 ; The state is the value that is monadically passed through the search
@@ -421,10 +426,10 @@
        (inc
          ((fresh (q) g0 g ...
             (lambdag@ (st)
-              (let ((st (state-with-scope st nonlocal-scope)))
-                (let ((z ((reify q) st)))
-                  (choice z (lambda () (lambda () #f)))))))
-          empty-state))))
+               (let* ((st^ (state-with-scope st nonlocal-scope))
+                      (z ((reify q) st^)))
+                 (choice z (lambda () (lambda () #f))))))
+         empty-state))))
     ((_ n (q0 q1 q ...) g0 g ...)
      (run n (x)
        (fresh (q0 q1 q ...)
@@ -467,8 +472,8 @@
                  (else #f))))
             (else #f)))))))
 
-(define symbolo-dyn (type-constraint symbol? 'symbolo))
-(define numbero-dyn (type-constraint number? 'numbero))
+(define symbolo (type-constraint symbol? 'symbolo))
+(define numbero (type-constraint number? 'numbero))
 
 (define (add-to-D st v d)
   (let* ((c (lookup-c st v))
@@ -494,13 +499,13 @@
                   (add-to-D st (cdr el) added)
                   st)))))))))
 
-(define =/=-dyn
+(define =/=
   (lambda (u v)
     (=/=* `((,u . ,v)))))
 
 ;; Generalized 'absento': 'term1' can be any legal term (old version
 ;; of faster-miniKanren required 'term1' to be a ground atom).
-(define absento-dyn
+(define absento
   (lambda (term1 term2)
     (lambdag@ (st)
       (let ((state (state-S st)))
@@ -1234,23 +1239,34 @@
   (lambda (g out)
     (lambdag@ (st)
       (bind*
-       (g (state (state-S st) (state-C st) '()))
+       (g (state (state-S st) (C-new-layer (state-C st)) '()))
+       generate-constraints
        (lambdag@ (st2)
          ((fresh ()
             (== out (walk-later (state-L st2) (state-S st2))))
           st))))))
 
+(define (generate-var-constraints v st)
+  (let ([c (lookup-c st v)])
+    (if (eq? c empty-c)
+        st
+        (let ([new-cs-stx (append
+                       (if (eq? (c-T c) 'symbolo)
+                           (list `(symbolo ,v))
+                           '())
+                       (if (eq? (c-T c) 'numbero)
+                           (list `(numbero ,v))
+                           '())
+                       (map (lambda (atom) `(absento ,(expand atom) ,v)) (c-A c))
+                       (map (lambda (d) `(=/=* ,(expand d))) (c-D c)))])
+          (foldl (lambda (c-stx st) ((later c-stx) st)) st new-cs-stx)))))
+          
+(define generate-constraints
+  (lambdag@ (st)
+     (let* ([vars (remove-duplicates (C-vars (state-C st)))])
+       (foldl generate-var-constraints
+              st
+              vars))))
+
 (define l== (lambda (e1 e2) (fresh () (later `(== ,(expand e1) ,(expand e2))))))
 (define l=/= (lambda (e1 e2) (fresh () (later `(=/= ,(expand e1) ,(expand e2))))))
-
-(define staging-time? (make-parameter #f))
-
-(define (plus-staging t l)
-  (if (staging-time?)
-      (lambdag@ (st) (bind* ((t) st) (later l)))
-      (t)))
-
-(define (symbolo x) (plus-staging (lambda () (symbolo-dyn x)) `(symbolo ,(expand x))))
-(define (numbero x) (plus-staging (lambda () (numbero-dyn x)) `(numbero ,(expand x))))
-(define (absento x y) (plus-staging (lambda () (absento-dyn x y)) `(absento ,(expand x) ,(expand y))))
-(define (=/= x y) (plus-staging (lambda () (=/=-dyn x y)) `(=/= ,(expand x) ,(expand y))))
