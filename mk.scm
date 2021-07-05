@@ -33,6 +33,8 @@
 ; The unique val for variables that have not yet been bound
 ; to a value or are bound in the substitution
 (define unbound (list 'unbound))
+(define (unbound? v) (eq? v unbound))
+
 
 (define var
   (let ((counter -1))
@@ -75,6 +77,13 @@
 ;
 ; Implementation of the substitution map depends on the Scheme used,
 ; as we need a map. See mk.rkt and mk-vicare.scm.
+
+(define empty-subst-map empty-intmap)
+(define subst-map-length intmap-count)
+(define (subst-map-lookup u S)
+  (intmap-ref S (var-idx u)))
+(define (subst-map-add S var val)
+  (intmap-set S (var-idx var) val))
 
 (define subst
   (lambda (mapping scope)
@@ -173,8 +182,29 @@
 ; are always on the representative element and must be moved / merged
 ; when that element changes.
 
-; Implementation depends on the Scheme used, as we need a map. See
-; mk.rkt and mk-vicare.scm.
+(define C-vars car)
+(define C-map cdr)
+(define empty-C (cons '() empty-intmap))
+
+(define (set-c st x c)
+  (state-with-C
+    st
+    (cons (cons x (C-vars (state-C st)))
+          (intmap-set (C-map (state-C st)) (var-idx x) c))))
+
+(define (lookup-c st x)
+  (let ((res (intmap-ref (C-map (state-C st)) (var-idx x))))
+    (if (unbound? res)
+      empty-c
+      res)))
+
+; t:unbind in mk-vicare.scm either is buggy or doesn't do what I would expect, so
+; I implement remove by setting the value to the empty constraint record.
+(define (remove-c x st)
+  (set-c st x empty-c))
+
+(define (C-new-layer C)
+  (cons '() (C-map C)))
 
 ; State object.
 ; The state is the value that is monadically passed through the search
@@ -191,6 +221,9 @@
 (define state-L (lambda (st) (caddr st)))
 
 (define empty-state (state empty-subst empty-C '()))
+
+(define (state-with-C st C^)
+  (state (state-S st) C^ (state-L st)))
 
 (define state-with-scope
   (lambda (st new-scope)
@@ -393,10 +426,10 @@
        (inc
          ((fresh (q) g0 g ...
             (lambdag@ (st)
-              (let ((st (state-with-scope st nonlocal-scope)))
-                (let ((z ((reify q) st)))
-                  (choice z (lambda () (lambda () #f)))))))
-          empty-state))))
+               (let* ((st^ (state-with-scope st nonlocal-scope))
+                      (z ((reify q) st^)))
+                 (choice z (lambda () (lambda () #f))))))
+         empty-state))))
     ((_ n (q0 q1 q ...) g0 g ...)
      (run n (x)
        (fresh (q0 q1 q ...)
@@ -431,21 +464,21 @@
           (cond
             ((type-pred term) st)
             ((var? term)
-             (let* ((c (lookup-c term st))
+             (let* ((c (lookup-c st term))
                    (T (c-T c)))
                (cond
                  ((eq? T type-id) st)
-                 ((not T) (set-c term (c-with-T c type-id) st))
+                 ((not T) (set-c st term (c-with-T c type-id)))
                  (else #f))))
             (else #f)))))))
 
-(define symbolo-dyn (type-constraint symbol? 'symbolo))
-(define numbero-dyn (type-constraint number? 'numbero))
+(define symbolo (type-constraint symbol? 'symbolo))
+(define numbero (type-constraint number? 'numbero))
 
 (define (add-to-D st v d)
-  (let* ((c (lookup-c v st))
+  (let* ((c (lookup-c st v))
          (c^ (c-with-D c (cons d (c-D c)))))
-    (set-c v c^ st)))
+    (set-c st v c^)))
 
 (define =/=*
   (lambda (S+)
@@ -466,13 +499,13 @@
                   (add-to-D st (cdr el) added)
                   st)))))))))
 
-(define =/=-dyn
+(define =/=
   (lambda (u v)
     (=/=* `((,u . ,v)))))
 
 ;; Generalized 'absento': 'term1' can be any legal term (old version
 ;; of faster-miniKanren required 'term1' to be a ground atom).
-(define absento-dyn
+(define absento
   (lambda (term1 term2)
     (lambdag@ (st)
       (let ((state (state-S st)))
@@ -485,12 +518,12 @@
                    (let ((st^ ((absento term1 (car term2)) st)))
                      (and st^ ((absento term1 (cdr term2)) st^))))            
                   ((var? term2)
-                   (let* ((c (lookup-c term2 st))
+                   (let* ((c (lookup-c st term2))
                           (A (c-A c)))
                      (if (memv term1 A)
                          st
                          (let ((c^ (c-with-A c (cons term1 A))))
-                           (set-c term2 c^ st)))))
+                           (set-c st term2 c^)))))
                   (else st))
                 #f)))))))
 
@@ -517,7 +550,7 @@
 ; hash-refs / hash-sets.
 (define update-constraints
   (lambda (a st)
-    (let ([old-c (lookup-c (lhs a) st)])
+    (let ([old-c (lookup-c st (lhs a))])
       (if (eq? old-c empty-c)
         st
         (let ((st (remove-c (lhs a) st)))
@@ -569,7 +602,7 @@
     (let ((vs (vars (walk* x (state-S st)) '())))
       (foldl
         (lambda (v c-store)
-          (let ((c (lookup-c v st)))
+          (let ((c (lookup-c st v)))
             (let ((S (state-S st))
                   (D (c->D c-store))
                   (Y (c->Y c-store))
@@ -1206,23 +1239,33 @@
   (lambda (g out)
     (lambdag@ (st)
       (bind*
-       (g (state (state-S st) (state-C st) '()))
+       (g (state (state-S st) (C-new-layer (state-C st)) '()))
+       generate-constraints
        (lambdag@ (st2)
          ((fresh ()
             (== out (walk-later (state-L st2) (state-S st2))))
           st))))))
 
+(define (generate-var-constraints st)
+  (lambda (v)
+    (let ([c (lookup-c st v)])
+      (if (eq? c empty-c)
+        st
+        (append
+          (if (eq? (c-T c) 'symbolo)
+            (list `(symbolo ,v))
+            '())
+          (if (eq? (c-T c) 'numbero)
+            (list `(numbero ,v))
+            '())
+          (map (lambda (atom) `(absento ,(expand atom) ,v)) (c-A c))
+          (map (lambda (d) `(=/=* ,(expand d))) (c-D c)))))))
+
+(define generate-constraints
+  (lambdag@ (st)
+     (let* ([vars (remove-duplicates (C-vars (state-C st)))]
+            [new-stx (apply append (map (generate-var-constraints st) vars))])
+       (state (state-S st) (state-C st) (append (state-L st) (reverse new-stx))))))
+
 (define l== (lambda (e1 e2) (fresh () (later `(== ,(expand e1) ,(expand e2))))))
 (define l=/= (lambda (e1 e2) (fresh () (later `(=/= ,(expand e1) ,(expand e2))))))
-
-(define staging-time? (make-parameter #f))
-
-(define (plus-staging t l)
-  (if (staging-time?)
-      (lambdag@ (st) (bind* ((t) st) (later l)))
-      (t)))
-
-(define (symbolo x) (plus-staging (lambda () (symbolo-dyn x)) `(symbolo ,(expand x))))
-(define (numbero x) (plus-staging (lambda () (numbero-dyn x)) `(numbero ,(expand x))))
-(define (absento x y) (plus-staging (lambda () (absento-dyn x y)) `(absento ,(expand x) ,(expand y))))
-(define (=/= x y) (plus-staging (lambda () (=/=-dyn x y)) `(=/= ,(expand x) ,(expand y))))
