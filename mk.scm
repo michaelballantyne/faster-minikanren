@@ -270,7 +270,12 @@
           (v (walk v s)))
       (cond
         ((eq? u v) (values s '()))
-        ((var? u) (ext-s-check u v s))
+        ((var? u)
+         (if (var? v)
+           (if (> (var-idx u) (var-idx v))
+             (ext-s-check u v s)
+             (ext-s-check v u s))
+           (ext-s-check u v s)))
         ((var? v) (ext-s-check v u s))
         ((and (pair? u) (pair? v))
          (let-values (((s added-car) (unify (car u) (car v) s)))
