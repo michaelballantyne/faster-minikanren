@@ -4,7 +4,8 @@
          racket/include)
 
 (provide run run*
-         == =/=
+         == ==-no-check
+         =/=
          fresh
          conde
          symbolo numbero stringo

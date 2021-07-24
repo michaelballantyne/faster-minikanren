@@ -215,6 +215,30 @@
       ((equal? u v) (values s '()))
       (else (values #f #f)))))
 
+; Term, Term, Substitution -> UnificationResult
+(define (unify-no-check u v s)
+  (let ((u (walk u s))
+        (v (walk v s)))
+    (cond
+      ((eq? u v) (values s '()))
+      ((and (var? u) (var? v))
+       (if (> (var-idx u) (var-idx v))
+         (ext-s-no-check u v s)
+         (ext-s-no-check v u s)))
+      ((var? u) (ext-s-no-check u v s))
+      ((var? v) (ext-s-no-check v u s))
+      ((and (pair? u) (pair? v))
+       (let-values (((s added-car) (unify-no-check (car u) (car v) s)))
+         (if s
+           (let-values (((s added-cdr) (unify-no-check (cdr u) (cdr v) s)))
+             ; Right now appends the list of added values from sub-unifications.
+             ; Alternatively could be threaded monadically, which could be faster
+             ; or slower.
+             (values s (append added-car added-cdr)))
+           (values #f #f))))
+      ((equal? u v) (values s '()))
+      (else (values #f #f)))))    
+
 ; Term, Substitution -> Term
 (define (walk u S)
   (let rec ((u u))
@@ -240,6 +264,9 @@
   (if (occurs-check x v S)
     (values #f #f)
     (values (subst-add S x v) (list (cons x v)))))
+
+(define (ext-s-no-check x v S)
+  (values (subst-add S x v) (list (cons x v))))
 
 (define (unify* S+ S)
   (unify (map lhs S+) (map rhs S+) S))
@@ -492,6 +519,13 @@
 (define (== u v)
   (lambda (st)
     (let-values (((S^ added) (unify u v (state-S st))))
+      (if S^
+        (and-foldl update-constraints (state S^ (state-C st)) added)
+        #f))))
+
+(define (==-no-check u v)
+  (lambda (st)
+    (let-values (((S^ added) (unify-no-check u v (state-S st))))
       (if S^
         (and-foldl update-constraints (state S^ (state-C st)) added)
         #f))))
