@@ -777,8 +777,8 @@
                             (type-constraint-ordering tc)))
          type-constraints)
     `(; booleans
-      (,(lambda (v) (eq? v #t)) . ,(lambda (x y) '=))
       (,(lambda (v) (eq? v #f)) . ,(lambda (x y) '=))
+      (,(lambda (v) (eq? v #t)) . ,(lambda (x y) '=))
       ; lists
       (,null? . ,(lambda (x y) '=))
       (,pair? . ,(lambda (x y)
