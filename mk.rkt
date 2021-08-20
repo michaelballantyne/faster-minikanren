@@ -13,6 +13,21 @@
          var?
          always-wrap-reified?)
 
+(module+ private
+  (provide
+    subst-add
+    state-S
+    subst-scope
+    walk
+    var
+    var?
+    ext-s-check
+    unify
+    empty-state
+    state-with-scope
+    new-scope
+    occurs-check))
+
 (define empty-intmap (hasheq))
 (define (intmap-count m) (hash-count m))
 (define (intmap-ref m k) (hash-ref m k (lambda () unbound)))
