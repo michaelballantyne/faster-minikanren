@@ -182,7 +182,7 @@
                            (cond
                              [(var? v^) (lit-cons-k v^ b c)]
                              [(equal? v^ '())
-                              (body b c (state S (state-C st)))]
+                              (body b c st)]
                              [else #f])))]
            [p1-cons-k (lambda (v^)
                         (let-values ([(b c res) (p1-cons)])
