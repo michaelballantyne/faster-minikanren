@@ -278,6 +278,46 @@
                 (lambda ()
                   (body b c S))))))))))
 
+(define (ex1-macros-direct-simple-cons a st)
+  (let* ([S (state-S st)]
+         [sc (subst-scope S)]
+         [b (var sc)]
+         [c (var sc)])
+    (let ([body (lambda (b c S^) S^)])
+          (mmatch-pair a S
+            [v^
+             (body b c (simple-ext-s-no-check v^ (list b c) S))]
+            [(b t2)
+             (mmatch-pair t2 S
+               [v^ (body b c (simple-ext-s-no-check v^ (list c) S))]
+               [(c t3)
+                (mmatch-lit t3 S '()
+                  [v^ (body b c (simple-ext-s-no-check v^ '() S))]
+                  [(body b c S)])])]))))
+
+(define (ex1-functions-direct-simple-cons a st)
+  (let* ([S (state-S st)]
+         [sc (subst-scope S)]
+         [b (var sc)]
+         [c (var sc)])
+    (let* ([body (lambda (b c S^) S^)])
+      (match-pair
+        a S
+        (lambda (v^)
+          (body b c (simple-ext-s-no-check v^ (list b c) S)))
+        (lambda (b t2)
+          (match-pair
+            t2 S
+            (lambda (v^)
+              (body b c (simple-ext-s-no-check v^ (list c) S)))
+            (lambda (c t3)
+              (match-literal-no-check
+                t3 S '()
+                (lambda (v^)
+                  (body b c (simple-ext-s-no-check v^ '() S)))
+                (lambda ()
+                  (body b c S))))))))))
+
 
 (define-syntax test-ex1-variants
   (syntax-rules ()
@@ -288,7 +328,9 @@
         ex1-manual-continuations
         ex1-manual-direct
         ex1-macros-direct
-        ex1-functions-direct)
+        ex1-functions-direct
+        ex1-macros-direct-simple-cons
+        ex1-functions-direct-simple-cons)
        (call arg ...))]))
 
 ; ground argument
