@@ -278,6 +278,13 @@
                 (lambda ()
                   (body b c S))))))))))
 
+;;;
+;;; ex1-functions-direct
+;;;
+
+; compilation isn't quite as tricky if we always allocate variables at the top. Then
+; we don't need the extra helper functions
+
 (define (ex1-macros-direct-always-alloc a st)
   (let* ([S (state-S st)]
          [sc (subst-scope S)]
@@ -317,6 +324,13 @@
                   (body b c (simple-ext-s-no-check v^ '() S)))
                 (lambda ()
                   (body b c S))))))))))
+
+;;;
+;;; ex1-functions-direct
+;;;
+
+; compilation is even easier if we always extend the substitution. Then compilation can
+; be compositional; we don't need to forward any variables along.
 
 (define (ex1-macros-direct-always-ext a st)
   (let* ([S (state-S st)]
