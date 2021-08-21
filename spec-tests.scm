@@ -7,6 +7,32 @@
 (define (simple-ext-s-no-check x v S)
   (subst-add S x v))
 
+(define (ext-s-no-check x v S)
+  (values (subst-add S x v) (list (cons x v))))
+
+(define (unify-no-check u v s)
+  (let ((u (walk u s))
+        (v (walk v s)))
+    (cond
+      ((eq? u v) (values s '()))
+      ((and (var? u) (var? v))
+       (if (> (var-idx u) (var-idx v))
+         (ext-s-no-check u v s)
+         (ext-s-no-check v u s)))
+      ((var? u) (ext-s-no-check u v s))
+      ((var? v) (ext-s-no-check v u s))
+      ((and (pair? u) (pair? v))
+       (let-values (((s added-car) (unify-no-check (car u) (car v) s)))
+         (if s
+           (let-values (((s added-cdr) (unify-no-check (cdr u) (cdr v) s)))
+             ; Right now appends the list of added values from sub-unifications.
+             ; Alternatively could be threaded monadically, which could be faster
+             ; or slower.
+             (values s (append added-car added-cdr)))
+           (values #f #f))))
+      ((equal? u v) (values s '()))
+      (else (values #f #f)))))
+
 
 ; test infrastructure
 (define loop-count 10000000)
@@ -64,7 +90,23 @@
         (unify a `(,b ,c) S)])
       r1)))
 
+(define (ex1-== a st)
+  (let* ([S (state-S st)]
+         [sc (subst-scope S)]
+         [b (var sc)]
+         [c (var sc)])
+    ((== a `(,b ,c)) st)))
 
+
+(define (ex1-unify-no-check a st)
+  (let* ([S (state-S st)]
+         [sc (subst-scope S)]
+         [b (var sc)]
+         [c (var sc)])
+    (let-values
+      ([(r1 r2)
+        (unify-no-check a `(,b ,c) S)])
+      r1)))
 
 ;;;
 ;;; ex1-manual-continuations
@@ -103,6 +145,49 @@
                         (let-values ([(b c res) (p1-cons)])
                           (let ([S^ (simple-ext-s-no-check v^ res S)])
                             (body b c S^))))]
+           [p1-match-k (lambda (b t2)
+                         (let ([v^ (walk t2 S)])
+                           (cond
+                             [(var? v^) (p2-cons-k v^ b)]
+                             [(pair? v^) (p2-match-k (car v^) (cdr v^) b)]
+                             [else #f])))])
+      (let ([v^ (walk a S)])
+        (cond
+          [(var? v^) (p1-cons-k v^)]
+          [(pair? v^) (p1-match-k (car v^) (cdr v^))]
+          [else #f])))))
+
+; version that does update-constraints at the end like ==
+(define (ex1-manual-continuations-== a st)
+  (let* ([S (state-S st)]
+         [sc (subst-scope S)])
+    (let* ([body (lambda (b c st)
+                   st)]
+           [lit-cons-k (lambda (v^ b c)
+                         (let ([S^ (simple-ext-s-no-check v^ '() S)])
+                           (body b c (update-constraints (cons v^ '()) (state S^ (state-C st))))))]
+           [p2-cons (lambda ()
+                      (let ([c (var sc)])
+                        (values c (cons c '()))))]
+           [p1-cons (lambda ()
+                      (let ([b (var sc)])
+                        (let-values ([(c t) (p2-cons)])
+                          (values b c (cons b t)))))]
+           [p2-cons-k (lambda (v^ b)
+                        (let-values ([(c res) (p2-cons)])
+                          (let ([S^ (simple-ext-s-no-check v^ res S)])
+                            (body b c (update-constraints (cons v^ res) (state S^ (state-C st)))))))]
+           [p2-match-k (lambda (c t3 b)
+                         (let ([v^ (walk t3 S)])
+                           (cond
+                             [(var? v^) (lit-cons-k v^ b c)]
+                             [(equal? v^ '())
+                              (body b c S)]
+                             [else #f])))]
+           [p1-cons-k (lambda (v^)
+                        (let-values ([(b c res) (p1-cons)])
+                          (let ([S^ (simple-ext-s-no-check v^ res S)])
+                            (body b c (update-constraints (cons v^ res) (state S^ (state-C st)))))))]
            [p1-match-k (lambda (b t2)
                          (let ([v^ (walk t2 S)])
                            (cond
@@ -411,13 +496,17 @@
      (time-test-variants descr
        ; variants of example 1 to test
        (ex1-unify
+        ex1-unify-no-check
         ex1-manual-continuations
         ex1-manual-direct
         ex1-macros-direct
         ex1-functions-direct
         ex1-macros-direct-always-alloc
         ex1-macros-direct-always-ext
-        ex1-combinators)
+        ex1-combinators
+        ex1-==
+        ex1-manual-continuations-==
+        )
        (call arg ...))]))
 
 ; ground argument
