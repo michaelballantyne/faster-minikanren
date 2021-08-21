@@ -182,7 +182,7 @@
                            (cond
                              [(var? v^) (lit-cons-k v^ b c)]
                              [(equal? v^ '())
-                              (body b c S)]
+                              (body b c (state S (state-C st)))]
                              [else #f])))]
            [p1-cons-k (lambda (v^)
                         (let-values ([(b c res) (p1-cons)])
@@ -364,7 +364,7 @@
                   (body b c S))))))))))
 
 ;;;
-;;; ex1-functions-direct
+;;; ex1-macros-direct-always-alloc
 ;;;
 
 ; compilation isn't quite as tricky if we always allocate variables at the top. Then
@@ -387,6 +387,10 @@
                   [v^ (body b c (simple-ext-s-no-check v^ '() S))]
                   [(body b c S)])])]))))
 
+;;;
+;;; ex1-functions-direct-always-alloc
+;;;
+
 (define (ex1-functions-direct-always-alloc a st)
   (let* ([S (state-S st)]
          [sc (subst-scope S)]
@@ -403,7 +407,7 @@
             (lambda (v^)
               (body b c (simple-ext-s-no-check v^ (list c) S)))
             (lambda (c t3)
-              (match-literal-no-check
+              (match-literal
                 t3 S '()
                 (lambda (v^)
                   (body b c (simple-ext-s-no-check v^ '() S)))
@@ -411,11 +415,8 @@
                   (body b c S))))))))))
 
 ;;;
-;;; ex1-functions-direct
+;;; ex1-macros-direct-always-ext
 ;;;
-
-; compilation is even easier if we always extend the substitution. Then compilation can
-; be compositional; we don't need to forward any variables along.
 
 (define (ex1-macros-direct-always-ext a st)
   (let* ([S (state-S st)]

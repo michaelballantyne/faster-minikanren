@@ -20,6 +20,10 @@
     subst-scope
     walk
     var
+    var-idx
+    update-constraints
+    state
+    state-C
     var?
     ext-s-check
     unify
