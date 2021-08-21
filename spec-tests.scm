@@ -207,12 +207,12 @@
                            (let-values ([(t c) (p2-cons)])
                               (values (cons b t) b c))))])
           (mmatch-pair a S
-            [v^ (let-values ([(b c res) (p1-cons)])
+            [v^ (let-values ([(res b c ) (p1-cons)])
                   (let ([S^ (simple-ext-s-no-check v^ res S)])
                     (body b c S^)))]
             [(b t2)
              (mmatch-pair t2 S
-               [v^ (let-values ([(c res) (p2-cons)])
+               [v^ (let-values ([(res c) (p2-cons)])
                      (let ([S^ (simple-ext-s-no-check v^ res S)])
                        (body b c S^)))]
                [(c t3)
@@ -237,7 +237,7 @@
        (k-m (car v^) (cdr v^))]
       [else #f])))
 
-(define (match-literal-no-check v S lit k-c k-m)
+(define (match-literal v S lit k-c k-m)
   (let ([v^ (walk v S)])
     (cond
       [(var? v^) (k-c v^)]
@@ -270,7 +270,7 @@
                 (let ([S^ (simple-ext-s-no-check v^ res S)])
                   (body b c S^))))
             (lambda (c t3)
-              (match-literal-no-check
+              (match-literal
                 t3 S '()
                 (lambda (v^)
                   (let ([S^ (simple-ext-s-no-check v^ '() S)])
@@ -278,7 +278,7 @@
                 (lambda ()
                   (body b c S))))))))))
 
-(define (ex1-macros-direct-simple-cons a st)
+(define (ex1-macros-direct-always-alloc a st)
   (let* ([S (state-S st)]
          [sc (subst-scope S)]
          [b (var sc)]
@@ -295,7 +295,7 @@
                   [v^ (body b c (simple-ext-s-no-check v^ '() S))]
                   [(body b c S)])])]))))
 
-(define (ex1-functions-direct-simple-cons a st)
+(define (ex1-functions-direct-always-alloc a st)
   (let* ([S (state-S st)]
          [sc (subst-scope S)]
          [b (var sc)]
@@ -318,6 +318,78 @@
                 (lambda ()
                   (body b c S))))))))))
 
+(define (ex1-macros-direct-always-ext a st)
+  (let* ([S (state-S st)]
+         [sc (subst-scope S)]
+         [b (var sc)]
+         [c (var sc)])
+    (let ([body (lambda (S^) S^)])
+          (mmatch-pair a S
+            [v^
+             (body (simple-ext-s-no-check v^ (list b c) S))]
+            [(b-v t2)
+             (let ([S (simple-ext-s-no-check b b-v S)])
+               (mmatch-pair t2 S
+                 [v^ (body (simple-ext-s-no-check v^ (list c) S))]
+                 [(c-v t3)
+                  (let ([S (simple-ext-s-no-check c c-v S)])
+                    (mmatch-lit t3 S '()
+                      [v^ (body (simple-ext-s-no-check v^ '() S))]
+                      [(body S)]))]))]))))
+
+;;;
+;;; ex1-combinators
+;;;
+
+; Lets try combinators with two cases: one for matching, one for constructing.
+
+(define (c-pair s1-m s1-c s2-m s2-c)
+  (let ([this-c (lambda ()
+                  (cons (s1-c) (s2-c)))])
+    (values
+      (lambda (v S k)
+        (let ([v^ (walk v S)])
+          (cond
+            [(var? v^) (k (simple-ext-s-no-check v^ (this-c) S))]
+            [(pair? v^)
+             (s1-m
+               (car v^) S
+               (lambda (S^)
+                 (s2-m (cdr v^) S^ k)))]
+            [else #f])))
+      this-c)))
+
+(define (c-literal lit)
+  (values
+    (lambda (v S k)
+      (let ([v^ (walk v S)])
+        (cond
+          [(var? v^) (k (simple-ext-s-no-check v^ lit S))]
+          [(equal? v^ lit)
+           (k S)]
+          [else #f])))
+    (lambda ()
+      lit)))
+
+(define (c-var x)
+  (values (lambda (v S k)
+            (let ([v^ (walk v S)])
+              (k (simple-ext-s-no-check x v S))))
+          (lambda ()
+            x)))
+
+(define (ex1-combinators a st)
+  (let* ([S (state-S st)]
+         [sc (subst-scope S)]
+         [b (var sc)]
+         [c (var sc)])
+    (let ([body (lambda (S^) S^)])
+      (let*-values ([(v1-m v1-c) (c-var b)]
+                    [(v2-m v2-c) (c-var c)]
+                    [(l1-m l1-c) (c-literal '())]
+                    [(p2-m p2-c) (c-pair v2-m v2-c l1-m l1-c)]
+                    [(p1-m p1-c) (c-pair v1-m v1-c p2-m p2-c)])
+        (p1-m a S body)))))
 
 (define-syntax test-ex1-variants
   (syntax-rules ()
@@ -329,8 +401,9 @@
         ex1-manual-direct
         ex1-macros-direct
         ex1-functions-direct
-        ex1-macros-direct-simple-cons
-        ex1-functions-direct-simple-cons)
+        ex1-macros-direct-always-alloc
+        ex1-macros-direct-always-ext
+        ex1-combinators)
        (call arg ...))]))
 
 ; ground argument
@@ -362,3 +435,12 @@
        [st (state-with-scope st (new-scope))])
   (test-ex1-variants "ex1 partially ground: `(1 2 . v)"
     (call a st)))
+
+
+; Notes on evaluation so far:
+;
+;  - runtime combinator composition is indeed slow
+;  - always allocating variables isn't such a big deal... even if we always extend them
+;      we can get a 3x boost from specialization. So we could have a nice compositional compilation
+;      strategy that way.
+;  - avoiding extending the substitution definitely makes compilation trickier, but it's fastest.
