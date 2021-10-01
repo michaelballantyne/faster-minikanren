@@ -245,6 +245,50 @@
                      [else #f])))]
               [else #f])))))))
 
+;;
+;; ex-manual-mut
+;;
+
+;; Specialize, but rely on the set-var-val! optimization rather than avoid variable
+;; allocation. And don't bother trying to avoid extra var allocations in write mode.
+
+(define (ex1-manual-mut a st)
+  (let* ([S (state-S st)]
+         [sc (subst-scope S)])
+    (let ([k (lambda (b t S)
+                (let ([k (lambda (c t S)
+                           (let ([k (lambda (S)
+                                      S)])
+                             (let ([v^ (walk t S)])
+                               (cond
+                                 [(var? v^)
+                                  (let* ([S^ (simple-ext-s-no-check v^ '() S)])
+                                    (k S^))]
+                                 [(equal? v^ '())
+                                  (k S)]
+                                 [else #f]))))])
+                  (let ([v^ (walk t S)])
+                    (cond
+                      [(var? v^)
+                       (let* ([v1 (var sc)]
+                              [v2 (var sc)]
+                              [S^ (simple-ext-s-no-check v^ (cons v1 v2) S)])
+                         (k v1 v2 S^))]
+                      [(pair? v^)
+                       (k (car v^) (cdr v^) S)]
+                      [else #f])))
+                S)])
+      (let ([v^ (walk a S)])
+        (cond
+          [(var? v^)
+           (let* ([v1 (var sc)]
+                  [v2 (var sc)]
+                  [S^ (simple-ext-s-no-check v^ (cons v1 v2) S)])
+             (k v1 v2 S^))]
+          [(pair? v^)
+           (k (car v^) (cdr v^) S)]
+          [else #f])))))
+
 
 ;;;
 ;;; ex1-macros-direct
@@ -500,6 +544,7 @@
         ex1-unify-no-check
         ex1-manual-continuations
         ex1-manual-direct
+        ex1-manual-mut
         ex1-macros-direct
         ex1-functions-direct
         ex1-macros-direct-always-alloc
