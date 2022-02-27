@@ -177,6 +177,9 @@
 
 (define empty-state (state empty-subst empty-C))
 
+(define (state-with-S st S^)
+  (state S^ (state-C st)))
+
 (define (state-with-C st C^)
   (state (state-S st) C^))
 
@@ -493,7 +496,7 @@
   (lambda (st)
     (let-values (((S^ added) (unify u v (state-S st))))
       (if S^
-        (and-foldl update-constraints (state S^ (state-C st)) added)
+        (and-foldl update-constraints (state-with-S st S^) added)
         #f))))
 
 ; Not fully optimized. Could do absento update with fewer
