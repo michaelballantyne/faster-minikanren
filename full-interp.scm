@@ -148,13 +148,13 @@
        (conde
          ((== v1 v2) (== #t val))
          ((=/= v1 v2) (== #f val))))]
-    ;; FIXME (webyrd) -- symbol?, and perhaps other type predicates, doesn't handle booleans (fails)
     [(== prim-id 'symbol?)
      (fresh (v)
        (== `(,v) a*)
        (conde
          ((symbolo v) (== #t val))
          ((numbero v) (== #f val))
+         ((booleano v) (== #f val))
          ((fresh (a d)
             (== `(,a . ,d) v)
             (== #f val)))))]
@@ -260,18 +260,16 @@
 
 (define (not-symbolo t)
   (conde
-    ((== #f t))
-    ((== #t t))
     ((== '() t))
+    ((booleano t))
     ((numbero t))
     ((fresh (a d)
        (== `(,a . ,d) t)))))
 
 (define (not-numbero t)
   (conde
-    ((== #f t))
-    ((== #t t))
     ((== '() t))
+    ((booleano t))
     ((symbolo t))
     ((fresh (a d)
        (== `(,a . ,d) t)))))
@@ -283,10 +281,10 @@
 
 (define (literalo t)
   (conde
+    ((== '() t))
     ((numbero t))
     ((symbolo t) (not-tago t))
-    ((booleano t))
-    ((== '() t))))
+    ((booleano t))))
 
 (define (booleano t)
   (conde
