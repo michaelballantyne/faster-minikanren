@@ -68,13 +68,13 @@
 (define t:bind
   (lambda (xi v s)
     (unless (and (fixnum? xi) (>= xi 0))
-      (error 't:bind "index must be a fixnum, got ~s" xi))
+      (error 't:bind (format "index must be a fixnum, got ~s" xi)))
     (nwt:bind s xi v)))
 
 (define t:lookup
   (lambda (xi s)
     (unless (and (fixnum? xi) (>= xi 0))
-      (error 't:lookup "index must be a fixnum, got ~s" xi))
+      (error 't:lookup (format "index must be a fixnum, got ~s" xi)))
     (nwt:lookup s xi)))
 
 
