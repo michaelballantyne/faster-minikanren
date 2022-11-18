@@ -1,6 +1,6 @@
 #lang racket/base
 
-(provide run run*
+(provide run run* defrel
          == =/=
          fresh
          conde

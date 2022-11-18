@@ -1,9 +1,9 @@
 (define-module (faster-miniKanren mk-guile)
-  #:export (run run*
+  #:export (run run* defrel
             == =/=
             fresh
             conde
-            symbolo numbero
+            symbolo numbero stringo
             absento
             matche))
 

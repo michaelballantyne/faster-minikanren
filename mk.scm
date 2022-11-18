@@ -365,6 +365,17 @@
     ((_ (q0 q ...) g0 g ...) (run #f (q0 q ...) g0 g ...))))
 
 
+(define-syntax defrel
+  (syntax-rules ()
+   ;; No suspend given single goal; search order for relations designed with define
+   ((_ (name arg ...) g)
+    (define (name arg ...) g))
+   ;; Use of fresh suspends when forming a conjunction to avoid nontermination
+   ((_ (name arg ...) g ...)
+    (define (name arg ...) (fresh () g ...)))))
+
+
+
 ; Constraints
 ; C refers to the constraint store map
 ; c refers to an individual constraint record

@@ -16,7 +16,7 @@
   (lambda (stx)
     (syntax-case stx ()
       [(defmatche (name args ...) clause ...)
-       #'(define (name args ...)
+       #'(defrel (name args ...)
            (matche (args ...) clause ...))])))
 
 (define-syntax lambdae

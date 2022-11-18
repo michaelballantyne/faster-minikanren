@@ -1,5 +1,3 @@
-(load "simple-interp.scm")
-
 (test "running backwards"
   (run 5 (q) (evalo q '(closure y x ((x . (closure z z ()))))))
   '(((lambda (x) (lambda (y) x)) (lambda (z) z))
@@ -13,14 +11,6 @@
     ((((lambda (_.0) _.0) (lambda (x) (lambda (y) x)))
       (lambda (z) z))
      (sym _.0))))
-
-(define lookupo
-  (lambda (x env t)
-    (fresh (rest y v)
-      (== `((,y . ,v) . ,rest) env)
-      (conde
-        ((== y x) (== v t))
-        ((=/= y x) (lookupo x rest t))))))
 
 (test "eval-exp-lc 1"
   (run* (q) (evalo '(((lambda (x) (lambda (y) x)) (lambda (z) z)) (lambda (a) a)) q))
@@ -29,20 +19,6 @@
 (test "eval-exp-lc 2"
   (run* (q) (evalo '((lambda (x) (lambda (y) x)) (lambda (z) z)) q))
   '((closure y x ((x . (closure z z ()))))))
-
-(test "running backwards"
-  (run 5 (q) (evalo q '(closure y x ((x . (closure z z ()))))))
-  '(((lambda (x) (lambda (y) x)) (lambda (z) z))
-    ((lambda (x) (x (lambda (y) x))) (lambda (z) z))
-    (((lambda (x) (lambda (y) x))
-      ((lambda (_.0) _.0) (lambda (z) z)))
-     (sym _.0))
-    ((((lambda (_.0) _.0) (lambda (x) (lambda (y) x)))
-      (lambda (z) z))
-     (sym _.0))
-    (((lambda (_.0) _.0)
-      ((lambda (x) (lambda (y) x)) (lambda (z) z)))
-     (sym _.0))))
 
 (test "fully-running-backwards"
   (run 5 (q)

@@ -66,7 +66,7 @@
       (== x y)
       (== y z)
       (=/= x 4)
-      (== z (+ 2 2))))
+      (== z 4)))
   '())
 
 (test "=/=-10"
@@ -74,7 +74,7 @@
     (fresh (x y z)
       (== x y)
       (== y z)
-      (== z (+ 2 2))
+      (== z 4)
       (=/= x 4)))
   '())
 
@@ -84,7 +84,7 @@
       (=/= x 4)
       (== y z)
       (== x y)
-      (== z (+ 2 2))))
+      (== z 4)))
   '())
 
 (test "=/=-12"
@@ -272,16 +272,18 @@
   '((_.0 (=/= ((_.0 5))))))
 
 (test "=/=-35"
-  (let ((foo (lambda (x)
-               (fresh (a)
-                 (=/= x a)))))
+  (let ()
+    (defrel (foo x)
+      (fresh (a)
+        (=/= x a)))
     (run* (q) (fresh (a) (foo a))))
   '(_.0))
 
 (test "=/=-36"
-  (let ((foo (lambda (x)
-               (fresh (a)
-                 (=/= x a)))))
+  (let ()
+    (defrel (foo x)
+      (fresh (a)
+        (=/= x a)))
     (run* (q) (fresh (b) (foo b))))
   '(_.0))
 
@@ -395,58 +397,55 @@
       (== x `(,z 2))))
   '((_.0 2)))
 
-(define distincto
-  (lambda (l)
-    (conde
-      ((== l '()))
-      ((fresh (a) (== l `(,a))))
-      ((fresh (a ad dd)
-         (== l `(,a ,ad . ,dd))
-         (=/= a ad)
-         (distincto `(,a . ,dd))
-         (distincto `(,ad . ,dd)))))))
+(defrel (distincto l)
+  (conde
+    ((== l '()))
+    ((fresh (a) (== l `(,a))))
+    ((fresh (a ad dd)
+       (== l `(,a ,ad . ,dd))
+       (=/= a ad)
+       (distincto `(,a . ,dd))
+       (distincto `(,ad . ,dd))))))
 
 (test "=/=-50"
    (run* (q)
      (distincto `(2 3 ,q)))
    '((_.0 (=/= ((_.0 2)) ((_.0 3))))))
 
-(define rembero
-  (lambda (x ls out)
-    (conde
-      ((== '() ls) (== '() out))
-      ((fresh (a d res)
-         (== `(,a . ,d) ls)
-         (rembero x d res)
-         (conde
-           ((== a x) (== out res))
-           ((== `(,a . ,res) out))))))))
+(defrel (rembero1 x ls out)
+  (conde
+    ((== '() ls) (== '() out))
+    ((fresh (a d res)
+       (== `(,a . ,d) ls)
+       (rembero1 x d res)
+       (conde
+         ((== a x) (== out res))
+         ((== `(,a . ,res) out)))))))
 
 (test "=/=-51"
-  (run* (q) (rembero 'a '(a b a c) q))
+  (run* (q) (rembero1 'a '(a b a c) q))
   '((b c) (b a c) (a b c) (a b a c)))
 
 (test "=/=-52"
-  (run* (q) (rembero 'a '(a b c) '(a b c)))
+  (run* (q) (rembero1 'a '(a b c) '(a b c)))
   '(_.0))
 
-(define rembero
-  (lambda (x ls out)
-    (conde
-      ((== '() ls) (== '() out))
-      ((fresh (a d res)
-         (== `(,a . ,d) ls)
-         (rembero x d res)
-         (conde
-           ((== a x) (== out res))
-           ((=/= a x) (== `(,a . ,res) out))))))))
+(defrel (rembero2 x ls out)
+  (conde
+    ((== '() ls) (== '() out))
+    ((fresh (a d res)
+       (== `(,a . ,d) ls)
+       (rembero2 x d res)
+       (conde
+         ((== a x) (== out res))
+         ((=/= a x) (== `(,a . ,res) out)))))))
 
 (test "=/=-53"
-  (run* (q) (rembero 'a '(a b a c) q))
+  (run* (q) (rembero2 'a '(a b a c) q))
   '((b c)))
 
 (test "=/=-54"
-  (run* (q) (rembero 'a '(a b c) '(a b c)))
+  (run* (q) (rembero2 'a '(a b c) '(a b c)))
   '())
 
 (test "=/=-55"

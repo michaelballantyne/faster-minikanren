@@ -28,6 +28,7 @@
 (load "test-infer.scm")
 
 (printf "test-simple-interp\n")
+(load "simple-interp.scm")
 (load "test-simple-interp.scm")
 
 (printf "test-quines\n")
@@ -36,3 +37,5 @@
 (printf "test-numbers\n")
 (load "numbers.scm")
 (load "test-numbers.scm")
+
+(load "full-interp.scm")

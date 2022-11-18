@@ -18,14 +18,13 @@
     (== `(,a . ,d) q)))
   '((5 . _.0) (_.0 . 6)))
 
-(define appendo
-  (lambda (l s out)
-    (conde
-      [(== '() l) (== s out)]
-      [(fresh (a d res)
-         (== `(,a . ,d) l)
-         (== `(,a . ,res) out)
-         (appendo d s res))])))
+(defrel (appendo l s out)
+  (conde
+    [(== '() l) (== s out)]
+    [(fresh (a d res)
+       (== `(,a . ,d) l)
+       (== `(,a . ,res) out)
+       (appendo d s res))]))
 
 (test "4"
   (run* (q) (appendo '(a b c) '(d e) q))
