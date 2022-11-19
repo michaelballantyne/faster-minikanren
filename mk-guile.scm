@@ -1,4 +1,4 @@
-(define-module (faster-miniKanren mk-guile)
+(define-module (faster-minikanren mk-guile)
   #:export (run run* defrel
             == =/=
             fresh
@@ -18,24 +18,12 @@
 (define fxsra fxarithmetic-shift-right)
 (define fxsll bitwise-arithmetic-shift-left)
 
-(include-from-path "faster-miniKanren/mk-vicare.scm")
-(include-from-path "faster-miniKanren/mk.scm")
+(include-from-path "faster-minikanren/mk-vicare.scm")
+(include-from-path "faster-minikanren/mk.scm")
 
-(define (andmap proc . args)
-  (let ((l (length (car args))))
-    (when (pair? (filter (lambda (x) (not (= l (length x)))) args))
-      (error 'andmap "Lists of unequal length" args)))
-  (let rec
-    ((result '())
-     (args args))
-    (if (equal? (car args) '())
-      (reverse result)
-      (let ((val (apply proc (map car args))))
-        (if (not val)
-          (reverse result)
-          (rec (cons val result)
-               (map cdr args)))))))
+(define andmap and-map)
+(define ormap or-map)
 
 (define generate-temporary gensym)
 
-(include-from-path "faster-miniKanren/matche.scm")
+(include-from-path "faster-minikanren/matche.scm")
