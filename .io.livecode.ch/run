@@ -1,0 +1,16 @@
+#!/bin/bash
+set -e
+
+cat .io.livecode.ch/header.txt $1 .io.livecode.ch/footer.txt >out.scm
+echo '(load "mk-vicare.scm")' >load.scm
+echo '(load "mk.scm")' >>load.scm
+echo '(load "test-check.scm")' >>load.scm
+if [ -s $2 ]
+then
+    mv $2 extra.scm
+else
+    touch extra.scm
+fi
+cat load.scm extra.scm out.scm >script.scm
+
+scheme mk.scm --script script.scm
