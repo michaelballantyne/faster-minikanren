@@ -1,0 +1,224 @@
+{% extends "base_livecode.html" %}
+
+{% block title %}Generating quines with only <code>fresh</code>, <code>conde</code> and <code>==</code>{% endblock %}
+
+{% block content %}
+<h2>Syntax</h2>
+
+<h3>Peano Numbers</h3>
+<div class="live norun" id="nat">
+(define nat
+  (lambda (o)
+    (conde
+      ((== o 'z))
+      ((fresh (n)
+         (== o `(s ,n))
+         (nat n))))))</div>
+
+<h3>Terms</h3>
+<div class="live norun" id="tm">
+(define tm
+  (lambda (o)
+    (conde
+      ((fresh (n)
+         (== o `(vr ,n))
+         (nat n)))
+      ((== o 'quote))
+      ((fresh (n t)
+         (== o `(lambda ((vr ,n)) ,t))
+         (nat n)
+         (tm t)))
+      ((fresh (t1 t2)
+         (== o `(,t1 ,t2))
+         (tm t1)
+         (tm t2)))
+      ((fresh (t1 t2)
+         (== o `(list ,t1 ,t2))
+         (tm t1)
+         (tm t2))))))</div>
+
+<h3>Values</h3>
+<div class="live norun" id="vl">
+(define vl
+  (lambda (o)
+    (conde
+      ((fresh (e n t)
+         (== o `(clo ,e ,n ,t))
+         (venv e)
+         (nat n)
+         (tm t)))
+      ((fresh (t)
+         (== o `(code ,t))
+         (tm t))))))</div>
+
+<h3>Environments</h3>
+<div class="live norun" id="venv">
+(define venv
+  (lambda (o)
+    (conde
+      ((== o '()))
+      ((fresh (n v e)
+         (== o (cons `(,n ,v) e))
+         (nat n)
+         (vl v)
+         (venv e))))))</div>
+
+<h2>Helpers</h2>
+
+<h3>Structural Disequality on Peano Numbers</h3>
+<div class="live norun" id="neq">
+(define neq
+  (lambda (n1 n2)
+    (conde
+      ((== n1 'z)
+       (fresh (n2-1)
+         (== n2 `(s ,n2-1))))
+      ((== n2 'z)
+       (fresh (n1-1)
+         (== n1 `(s ,n1-1))))
+      ((fresh (n1-1 n2-1)
+         (== n1 `(s ,n1-1))
+         (== n2 `(s ,n2-1)))))))</div>
+
+<h3>Environment Lookup (keys are peano nunmbers)</h3>
+<div class="live norun" id="vlookup" data-lib="neq">
+(define vlookup
+  (lambda (e x v)
+    (conde
+      ((fresh (er)
+         (== e (cons `(,x ,v) er))))
+      ((fresh (y vy er)
+         (== e (cons `(,y ,vy) er))
+         (neq x y)
+         (vlookup er x v))))))</div>
+
+<h2>Evaluation</h2>
+<div class="live norun" id="ev" data-lib="neq vlookup">
+(define ev
+  (lambda (e t v)
+    (conde
+      ((fresh (x)
+         (== t `(vr ,x))
+         (vlookup e x v)))
+      ((fresh (x t0)
+         (== t `(lambda ((vr ,x)) ,t0))
+         (== v `(clo ,e ,x ,t0))))
+      ((fresh (t0)
+         (== t `(quote ,t0))
+         (== v `(code ,t0))))
+      ((fresh (t1 t2 e0 x0 t0 v2)
+         (== t `(,t1 ,t2))
+         (ev e t1 `(clo ,e0 ,x0 ,t0))
+         (ev e t2 v2)
+         (ev (cons `(,x0 ,v2) e0) t0 v)))
+      ((fresh (t1 t2 c1 c2)
+         (== t `(list ,t1 ,t2))
+         (ev e t1 `(code ,c1))
+         (ev e t2 `(code ,c2))
+         (== v `(code ,(list c1 c2))))))))</div>
+
+<h2>Normalization</h2>
+
+<p>We normalize terms, so that they can be evaluated in Scheme.
+Our language is a subset of Scheme, except that we need to turn
+our peano-encoded variables into Scheme symbols injectively.</p>
+
+<p>We normalize the list <code>(s ...(s &lt;x&gt;))</code>
+to <code>s...s&lt;x&gt;</code>, where <code>s</code> can be
+applied <code>0</code> or more times to the symbol &lt;x&gt;, which will be
+either <code>z</code> or an unbound logic variable such
+as <code>_.0</code>.</p>
+<div class="live norun" id="normalize-var-name">
+(define normalize-var-name
+  (lambda (n)
+    (if (and (list? n) (eq? 's (car n)) (null? (cddr n)))
+        (string->symbol (string-append
+                         (symbol->string (car n))
+                         (symbol->string (normalize-var-name (cadr n)))))
+        (begin
+          (assert (symbol? n))
+          n))))</div>
+
+<p>We normalize all occurrences of <code>(vr &lt;peano&gt;)</code>. to
+a symbol. In addition, we quote unconstraint logic variables, so that
+strict Scheme evaluators like Vicare's accept such terms.</p>
+<div class="live norun" id="normalize" data-lib="normalize-var-name">
+(define unbound?
+  (lambda (x)
+    (and (symbol? x)
+         (let ((s (symbol->string x)))
+           (and (> (string-length s) 2)
+                (char=? #\_ (string-ref s 0))
+                (char=? #\. (string-ref s 1)))))))
+
+(define normalize
+  (lambda (t)
+    (if (list? t)
+        (if (and (eq? 'vr (car t)) (null? (cddr t)))
+            (normalize-var-name (cadr t))
+            (map normalize t))
+        (begin
+          (assert (not (eq? 'vr t)))
+          (if (unbound? t) `(quote ,t) t)))))</div>
+
+<h2>Tests</h3>
+
+<h3>Helpers</h3>
+
+<div class="live norun" id="ok">
+(define ok
+  (lambda (r)
+    (assert (not (null? r)))
+    (map pretty-print r)
+    (length r)))</div>
+
+<p>We will evaluate the generated terms in Scheme, using <code>eval</code>.</p>
+<div class="live norun" id="scheme-eval">
+(define scheme-eval
+  (lambda (c)
+    (eval c (environment '(rnrs)))))</div>
+
+<h3>Quine verification</h3>
+
+<div class="live" id="quine-verif" data-lib="neq vlookup ev normalize-var-name normalize ok scheme-eval nat tm vl venv">
+(define quine
+  '((lambda ((vr z)) (list (vr z) (list (quote quote) (vr z))))
+    (quote (lambda ((vr z)) (list (vr z) (list (quote quote) (vr z)))))))
+(ok
+ (normalize
+  (run* (q)
+    (ev '()
+        quine
+        `(code ,quine)))))</div>
+
+<h3>Quine generation</h3>
+<div class="live" id="quine-gen" data-lib="neq vlookup ev normalize-var-name normalize ok scheme-eval nat tm vl venv">
+(ok
+ (map
+  (lambda (q)
+    (assert (equal? (scheme-eval q) q))
+    q)
+  (normalize
+   (run 10 (q)
+     (ev '()
+         q
+         `(code ,q))))))</div>
+
+<h3>Twine generation</h3>
+<div class="live" id="twine-gen" data-lib="neq vlookup ev normalize-var-name normalize ok scheme-eval nat tm vl venv">
+(ok
+ (map
+  (lambda (ab)
+    (let ((a (car ab))
+          (b (cadr ab)))
+      (assert (equal? (scheme-eval a) b))
+      (assert (equal? (scheme-eval b) a))
+      (list a b)))
+  (normalize
+   (run 1 (q)
+     (fresh (a b)
+       (== q `(,a ,b))
+       (ev '() a `(code ,b))
+       (ev '() b `(code ,a)))))))</div>
+
+{% endblock %}
