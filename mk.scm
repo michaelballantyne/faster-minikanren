@@ -207,9 +207,10 @@
        (let-values (((s added-car) (unify (car u) (car v) s)))
          (if s
            (let-values (((s added-cdr) (unify (cdr u) (cdr v) s)))
-             ; Right now appends the list of added values from sub-unifications.
-             ; Alternatively could be threaded monadically, which could be faster
-             ; or slower.
+             ; Right now unconditionally appends the list of added values from
+             ; sub-unifications.
+             ; Alternatively could be threaded monadically, and/or check before appending
+             ; which could be faster or slower probably depending on the use case.
              (values s (append added-car added-cdr)))
            (values #f #f))))
       ((equal? u v) (values s '()))
