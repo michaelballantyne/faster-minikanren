@@ -11,8 +11,9 @@
          var?
          always-wrap-reified?)
 
-(require "private-unstable.rkt"
-         (prefix-in mk: "private-unstable.rkt"))
+(require (rename-in "private-unstable.rkt"
+                    [fail mk:fail]
+                    [succeed mk:succeed]))
 
 (define fail (procedure-rename mk:fail 'fail))
 (define succeed (procedure-rename mk:succeed 'succeed))
