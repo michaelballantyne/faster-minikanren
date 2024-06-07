@@ -1,4 +1,4 @@
-# miniKanren-with-symbolic-constraints
+# faster-miniKanren
 
 A revision of https://github.com/webyrd/miniKanren-with-symbolic-constraints/ for better performance. Up to 10x faster for large queries involving heavy use of constraints.
 
