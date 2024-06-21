@@ -46,7 +46,7 @@
                   (with-syntax ([([pat^ ...] (c^ ...) (x^ ...))
                                  (parse-pattern #'(args ...) #'[pat ...])])
                     #'([p^ pat^ ...] (c ... c^ ...) (x ... x^ ...))))]
-               [x (error 'parse-pattern "bad syntax ~s ~s" args pat)])))
+               [x (error 'parse-pattern (format "bad syntax ~s ~s" args pat))])))
          (define parse-patterns-for-arg
            (lambda (v pat)
              (define loop
@@ -57,13 +57,13 @@
                       #'((unquote _new) () (_new)))]
                    [(unquote x)
                     (when (free-identifier=? #'x v)
-                      (error 'matche "argument ~s appears in pattern at an invalid depth"
-                             (syntax->datum #'x)))
+                      (error 'matche (format "argument ~s appears in pattern at an invalid depth"
+                                             (syntax->datum #'x))))
                     #'((unquote x) () (x))]
                    [(unquote (? c x))
                     (when (free-identifier=? #'x v)
-                      (error 'matche "argument ~s appears in pattern at an invalid depth"
-                             (syntax->datum #'x)))
+                      (error 'matche (format "argument ~s appears in pattern at an invalid depth"
+                                             (syntax->datum #'x))))
                     #'((unquote x) ((c x)) (x))]
                    [(a . d)
                     (with-syntax ([((pat1 (c1 ...) (x1 ...))
