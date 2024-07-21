@@ -754,10 +754,7 @@
   (sort-lex (map sort-d D)))
 
 (define (sort-d d)
-  (list-sort
-    (lambda (x y)
-      (lex<=? (car x) (car y)))
-    (map sort-pr d)))
+  (list-sort lex<=? (map sort-pr d)))
 
 (define (symbol<? a b) (string<? (symbol->string a) (symbol->string b)))
 
