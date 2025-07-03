@@ -279,3 +279,7 @@
       (=/= `(,w ,y) `(,x ,z))
       (== `(,w ,x ,y ,z) q)))
   '(((a a _.0 _.1) (=/= ((_.0 _.1))))))
+
+(test "test reifier tags each var only once"
+  (run 1 (q) (fresh (x y) (== q (cons x (cons x y))) (symbolo x)))
+  '(((_.0 _.0 . _.1) (sym _.0))))

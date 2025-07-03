@@ -571,12 +571,13 @@
               (walk* A R))))))
 
 (define (vars term)
-  (let rec ((term term) (acc '()))
-    (cond
-      ((var? term) (cons term acc))
-      ((pair? term)
-       (rec (cdr term) (rec (car term) acc)))
-      (else (remove-duplicates acc)))))
+  (remove-duplicates
+	(let rec ((term term) (acc '()))
+	  (cond
+		((var? term) (cons term acc))
+		((pair? term)
+		 (rec (cdr term) (rec (car term) acc)))
+		(else acc)))))
 
 (define (extract-and-normalize st relevant-vars x)
   (define T (map (lambda (tc-type)
