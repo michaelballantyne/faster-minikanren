@@ -10,16 +10,13 @@
 (module compatibility racket/base
   (provide (all-defined-out))
 
-  (require racket/list)
-  
+  (require racket/list
+		   (only-in racket/port
+                    [call-with-output-string call-with-string-output-port]))
+
   (define (list-sort f l) (sort l f))
 
-  (define (remp f l) (filter-not f l))
-
-  (define (call-with-string-output-port f)
-    (define p (open-output-string))
-    (f p)
-    (get-output-string p))
+  (define remp filter-not)
 
   (define (exists f l) (ormap f l))
 
