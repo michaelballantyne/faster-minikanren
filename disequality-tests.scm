@@ -469,6 +469,8 @@
               ((_.0 ()))
               ((_.0 (foo)))))))
 
+; Note that the sort order currently depends on variable allocation order;
+; see the comment on sort-d.
 (test "lexicographic sorting in =/= reification"
   (run 1 (q p r)
     (=/= `(,q ,q) `(,p ,r)))
