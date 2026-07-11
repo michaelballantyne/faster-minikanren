@@ -1,0 +1,14 @@
+name: Tests
+
+on: [push, pull_request]
+
+jobs:
+  run_tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: Bogdanp/setup-racket@v1.9
+        with:
+          version: 9.2
+      - run: raco pkg install -j 2 --auto
+      - run: raco test -j 2 -p faster-minikanren
