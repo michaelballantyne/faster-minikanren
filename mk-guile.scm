@@ -11,11 +11,6 @@
 (import (rnrs (6)))
 (import (rnrs records syntactic (6)))
 
-(define sub1 1-)
-(define add1 1+)
-
-(define fx= fx=?)
-(define fxsla fxarithmetic-shift-left)
 (define fxsra fxarithmetic-shift-right)
 (define fxsll bitwise-arithmetic-shift-left)
 
