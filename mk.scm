@@ -565,7 +565,7 @@
            (v (walk* x S))
            (R (reify-S v (subst empty-subst-map nonlocal-scope)))
            (relevant-vars (vars v)))
-      (let*-values (((T D A) (extract-and-normalize st relevant-vars x))
+      (let*-values (((T D A) (extract-and-normalize st relevant-vars))
                     ((D A)   (drop-irrelevant D A relevant-vars))
                     ((D A)   (drop-subsumed D A st)))
         (form (walk* v R)
@@ -582,7 +582,7 @@
 		 (rec (cdr term) (rec (car term) acc)))
 		(else acc)))))
 
-(define (extract-and-normalize st relevant-vars x)
+(define (extract-and-normalize st relevant-vars)
   (define T (map (lambda (tc-type)
                    (cons (type-constraint-reified tc-type)
                          (filter-map (lambda (x)
