@@ -3,7 +3,7 @@
 ;
 ; https://github.com/calvis/cKanren/blob/dev/cKanren/matche.rkt#L54
 
-; Note that this definition is available at syntax phase in chez and vicare due to implicit
+; Note that this definition is available at syntax phase in Chez due to implicit
 ; phasing, but not in Racket (which uses explicit phasing). Racket already has a version available
 ; by default though, so that's fine. This definition isn't just isn't used in Racket.
 (define syntax->list

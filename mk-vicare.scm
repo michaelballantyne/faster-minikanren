@@ -1,4 +1,4 @@
-; This file needs to be loaded before mk.scm for Vicare. I can't figure
+; This file needs to be loaded before mk.scm. I can't figure
 ; out how to do loads relative to a source file rather than the working
 ; directory, else this file would load mk.scm.
 

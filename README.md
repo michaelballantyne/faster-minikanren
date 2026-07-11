@@ -40,7 +40,7 @@ to load tests:
 racket test-all.rktl
 ```
 
-### Vicare and Chez Scheme
+### Chez Scheme
 
 ```
 (load "mk-vicare.scm")
@@ -54,6 +54,8 @@ To run tests:
 (load "mk.scm")
 (load "test-all.scm")
 ```
+
+(The file is named `mk-vicare.scm` for historical reasons and has not been renamed to avoid breaking users relying on that filename.)
 
 ### Guile
 
