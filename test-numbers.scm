@@ -38,6 +38,17 @@
     ((0 1 1) (0 0 1) (0 0 0 1 1))
     ((0 0 1 1) (0 1) (0 0 0 1 1))))
 
+; Regression test for https://github.com/michaelballantyne/faster-minikanren/issues/27
+; The old logo produced ((_.0 . _.1) () ()) as the first answer, which overlaps
+; with (and unifies with) the b>=2 answer ((_.0 _.1 . _.2) () ()), enumerating
+; the same solution twice. The correct answer set is pairwise disjoint.
+(test "logo of 1 (issue 27)"
+  (run* (b q r) (logo '(1) b q r))
+  '(((1) () ())
+    (() (_.0 . _.1) (1))
+    ((1) (_.0 . _.1) ())
+    ((_.0 _.1 . _.2) () ())))
+
 (defrel (number-primo exp env val)
   (fresh (n)
     (== `(intexp ,n) exp)
