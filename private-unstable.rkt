@@ -25,7 +25,9 @@
   (define (find f l)
     (cond [(memf f l) => car] [else #f]))
 
-  (define memp memf))
+  (define memp memf)
+  
+  (define format-error error))
 
 (require (submod "." compatibility))
 

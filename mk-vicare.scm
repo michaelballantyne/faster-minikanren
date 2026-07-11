@@ -2,6 +2,11 @@
 ; out how to do loads relative to a source file rather than the working
 ; directory, else this file would load mk.scm.
 
+; Racket-style error for R6RS Schemes: R6RS `error` does not interpret ~s
+; directives in its message, so pre-format the message.
+(define (format-error who fmt . args)
+  (error who (apply format #f fmt args)))
+
 ; Trie implementation. The initial original trie version was due to Abdulaziz Ghuloum.
 ; Greg Rosenblatt changed it to an N-way Trie to reduce depth.
 
@@ -68,13 +73,13 @@
 (define t:bind
   (lambda (xi v s)
     (unless (and (fixnum? xi) (>= xi 0))
-      (error 't:bind "index must be a fixnum, got ~s" xi))
+      (format-error 't:bind "index must be a fixnum, got ~s" xi))
     (nwt:bind s xi v)))
 
 (define t:lookup
   (lambda (xi s)
     (unless (and (fixnum? xi) (>= xi 0))
-      (error 't:lookup "index must be a fixnum, got ~s" xi))
+      (format-error 't:lookup "index must be a fixnum, got ~s" xi))
     (nwt:lookup s xi)))
 
 

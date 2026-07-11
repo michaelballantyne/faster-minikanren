@@ -824,7 +824,7 @@
   (let-values ([(idx pr) (index+element-where type-orderings (lambda (pr) ((lhs pr) v)))])
     (if idx
       (values idx (rhs pr))
-      (error 'type-index "missing ordering for type of value ~s" v))))
+      (format-error 'type-index "missing ordering for type of value ~s" v))))
 
 ; (Term, Term) -> (or CompareResult error)
 ; defined when arguments are pairs, null, or atomic types addressed by type-constraints;
