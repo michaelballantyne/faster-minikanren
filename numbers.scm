@@ -1,21 +1,115 @@
-(defrel (appendo l s out)
-  (conde
-    [(== '() l) (== s out)]
-    [(fresh (a d res)
-       (== `(,a . ,d) l)
-       (== `(,a . ,res) out)
-       (appendo d s res))]))
+;;; Copyright © 2018 Daniel P. Friedman, William E. Byrd, Oleg Kiselyov, and Jason Hemann
+;;;
+;;; Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+;;;
+;;; The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+;;;
+;;; THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-(define build-num
-  (lambda (n)
-    (cond
-      ((odd? n)
-       (cons 1
-         (build-num (quotient (- n 1) 2))))
-      ((and (not (zero? n)) (even? n))
-       (cons 0
-         (build-num (quotient n 2))))
-      ((zero? n) '()))))
+
+;;; Implementation of the arithmetic system used in 'The Reasoned
+;;; Schemer, Second Edition,' by Friedman, Byrd, Kiselyov, and Hemann
+;;; (MIT Press, 2018).
+;;;
+;;; Adapted from
+;;; https://github.com/TheReasonedSchemer2ndEd/CodeFromTheReasonedSchemer2ndEd/blob/master/trs2-arith.scm
+
+;;; Definitions are presented in the order in which they appear in
+;;; Chapters 7 and 8.
+
+;;; As in the book, there are three definitions of '/o'.  The first two,
+;;; flawed definitions, are commented out using Scheme's '#;' convention.
+;;; The final definition of '/o' is uncommented.
+
+
+
+; Helper definitions from Chapters 2 and 4.
+(defrel (nullo x)
+  (== '() x))
+
+(defrel (conso a d p)
+  (== `(,a . ,d) p))
+
+(defrel (caro p a)
+  (fresh (d)
+    (== (cons a d) p)))
+
+(defrel (cdro p d)
+  (fresh (a)
+    (== (cons a d) p)))
+
+(defrel (appendo l t out)
+  (conde
+    ((nullo l) (== t out))
+    ((fresh (a d res)
+       (conso a d l)
+       (conso a res out)
+       (appendo d t res)))))
+
+
+
+;;; Here are the key parts of Chapter 7
+(defrel (bit-xoro x y r)
+  (conde
+    ((== 0 x) (== 0 y) (== 0 r))
+    ((== 0 x) (== 1 y) (== 1 r))
+    ((== 1 x) (== 0 y) (== 1 r))
+    ((== 1 x) (== 1 y) (== 0 r))))
+
+(defrel (bit-ando x y r)
+  (conde
+    ((== 0 x) (== 0 y) (== 0 r))
+    ((== 1 x) (== 0 y) (== 0 r))
+    ((== 0 x) (== 1 y) (== 0 r))
+    ((== 1 x) (== 1 y) (== 1 r))))
+
+
+(defrel (half-addero x y r c)
+  (bit-xoro x y r)
+  (bit-ando x y c))
+
+; Alternative definition of 'half-addero' from frame 7:12 on page 87.
+#;(defrel (half-addero x y r c)
+  (conde
+    ((== 0 x) (== 0 y) (== 0 r) (== 0 c))
+    ((== 1 x) (== 0 y) (== 1 r) (== 0 c))
+    ((== 0 x) (== 1 y) (== 1 r) (== 0 c))
+    ((== 1 x) (== 1 y) (== 0 r) (== 1 c))))
+
+
+
+; Definition of 'full-addero' from frame 7:15 on page 87.
+#;(defrel (full-addero b x y r c)
+  (fresh (w xy wz)
+    (half-addero x y w xy)
+    (half-addero w b r wz)
+    (bit-xoro xy wz c)))
+
+; Alternative definition of 'full-addero' from frame 7:15 on page 87.
+;
+; For performance reasons, we use this explicit table version of
+; 'full-addero' (which no longer uses 'half-addero').
+(defrel (full-addero b x y r c)
+  (conde
+    ((== 0 b) (== 0 x) (== 0 y) (== 0 r) (== 0 c))
+    ((== 1 b) (== 0 x) (== 0 y) (== 1 r) (== 0 c))
+    ((== 0 b) (== 1 x) (== 0 y) (== 1 r) (== 0 c))
+    ((== 1 b) (== 1 x) (== 0 y) (== 0 r) (== 1 c))
+    ((== 0 b) (== 0 x) (== 1 y) (== 1 r) (== 0 c))
+    ((== 1 b) (== 0 x) (== 1 y) (== 0 r) (== 1 c))
+    ((== 0 b) (== 1 x) (== 1 y) (== 0 r) (== 1 c))
+    ((== 1 b) (== 1 x) (== 1 y) (== 1 r) (== 1 c))))
+
+
+(define (build-num n)
+  (cond
+    ((zero? n) '())
+    ((even? n)
+     (cons 0
+       (build-num (quotient n 2))))
+    ((odd? n)
+     (cons 1
+       (build-num (quotient (- n 1) 2))))))
 
 (defrel (zeroo n)
   (== '() n))
@@ -28,41 +122,30 @@
   (fresh (a ad dd)
     (== `(,a ,ad . ,dd) n)))
 
-(defrel (full-addero b x y r c)
+(defrel (addero b n m r)
   (conde
-    ((== 0 b) (== 0 x) (== 0 y) (== 0 r) (== 0 c))
-    ((== 1 b) (== 0 x) (== 0 y) (== 1 r) (== 0 c))
-    ((== 0 b) (== 1 x) (== 0 y) (== 1 r) (== 0 c))
-    ((== 1 b) (== 1 x) (== 0 y) (== 0 r) (== 1 c))
-    ((== 0 b) (== 0 x) (== 1 y) (== 1 r) (== 0 c))
-    ((== 1 b) (== 0 x) (== 1 y) (== 0 r) (== 1 c))
-    ((== 0 b) (== 1 x) (== 1 y) (== 0 r) (== 1 c))
-    ((== 1 b) (== 1 x) (== 1 y) (== 1 r) (== 1 c))))
-
-(defrel (addero d n m r)
-  (conde
-    ((== 0 d) (== '() m) (== n r))
-    ((== 0 d) (== '() n) (== m r)
+    ((== 0 b) (== '() m) (== n r))
+    ((== 0 b) (== '() n) (== m r)
      (poso m))
-    ((== 1 d) (== '() m)
+    ((== 1 b) (== '() m)
      (addero 0 n '(1) r))
-    ((== 1 d) (== '() n) (poso m)
+    ((== 1 b) (== '() n) (poso m)
      (addero 0 '(1) m r))
     ((== '(1) n) (== '(1) m)
      (fresh (a c)
        (== `(,a ,c) r)
-       (full-addero d 1 1 a c)))
-    ((== '(1) n) (gen-addero d n m r))
+       (full-addero b 1 1 a c)))
+    ((== '(1) n) (gen-addero b n m r))
     ((== '(1) m) (>1o n) (>1o r)
-     (addero d '(1) n r))
-    ((>1o n) (gen-addero d n m r))))
+     (addero b '(1) n r))
+    ((>1o n) (gen-addero b n m r))))
 
-(defrel (gen-addero d n m r)
-  (fresh (a b c e x y z)
+(defrel (gen-addero b n m r)
+  (fresh (a c d e x y z)
     (== `(,a . ,x) n)
-    (== `(,b . ,y) m) (poso y)
+    (== `(,d . ,y) m) (poso y)
     (== `(,c . ,z) r) (poso z)
-    (full-addero d a b c e)
+    (full-addero b a d c e)
     (addero e x y z)))
 
 (defrel (pluso n m k)
@@ -71,6 +154,7 @@
 (defrel (minuso n m k)
   (pluso m k n))
 
+;;; Here are the key parts of Chapter 8
 (defrel (*o n m p)
   (conde
     ((== '() n) (== '() p))
@@ -146,51 +230,42 @@
     ((== n m))
     ((<o n m))))
 
-(defrel (/o n m q r)
+; Flawed definition of '/o' from frame 8:54 on page 118.
+#;(defrel (/o n m q r)
   (conde
-    ((== r n) (== '() q) (<o n m))
-    ((== '(1) q) (=lo n m) (pluso r m n)
+    ((== '() q) (== n r) (<o n m))
+    ((== '(1) q) (== '() r) (== n m)
      (<o r m))
-    ((<lo m n)
-     (<o r m)
-     (poso q)
-     (fresh (nh nl qh ql qlm qlmr rr rh)
-       (splito n r nl nh)
-       (splito q r ql qh)
-       (conde
-         ((== '() nh)
-          (== '() qh)
-          (minuso nl r qlm)
-          (*o ql m qlm))
-         ((poso nh)
-          (*o ql m qlm)
-          (pluso qlm r qlmr)
-          (minuso qlmr nl rr)
-          (splito rr r '() rh)
-          (/o nh m qh rh)))))))
+    ((<o m n) (<o r m)
+     (fresh (mq)
+       (<=lo mq n)
+       (*o m q mq)
+       (pluso mq r n)))))
+
+; Flawed definition of '/o' from frame 8:64 on page 120.
+#;(defrel (/o n m q r)
+  (fresh (mq)
+    (<o r m)
+    (<=lo mq n)
+    (*o m q mq)
+    (pluso mq r n)))
 
 (defrel (splito n r l h)
   (conde
     ((== '() n) (== '() h) (== '() l))
     ((fresh (b n^)
-       (== `(0 ,b . ,n^) n)
-       (== '() r)
-       (== `(,b . ,n^) h)
-       (== '() l)))
+       (== `(0 ,b . ,n^) n) (== '() r)
+       (== `(,b . ,n^) h) (== '() l)))
     ((fresh (n^)
-       (== `(1 . ,n^) n)
-       (== '() r)
-       (== n^ h)
-       (== '(1) l)))
+       (==  `(1 . ,n^) n) (== '() r)
+       (== n^ h) (== '(1) l)))
     ((fresh (b n^ a r^)
        (== `(0 ,b . ,n^) n)
-       (== `(,a . ,r^) r)
-       (== '() l)
+       (== `(,a . ,r^) r) (== '() l)
        (splito `(,b . ,n^) r^ '() h)))
     ((fresh (n^ a r^)
        (== `(1 . ,n^) n)
-       (== `(,a . ,r^) r)
-       (== '(1) l)
+       (== `(,a . ,r^) r) (== '(1) l)
        (splito n^ r^ '() h)))
     ((fresh (b n^ a r^ l^)
        (== `(,b . ,n^) n)
@@ -199,81 +274,105 @@
        (poso l^)
        (splito n^ r^ l^ h)))))
 
+; Final definition of '/o' from frame 8:81 on page 124.
+(defrel (/o n m q r)
+  (conde
+    ((== '() q) (== r n) (<o n m))
+    ((== '(1) q) (=lo m n) (pluso r m n)
+     (<o r m))
+    ((poso q) (<lo m n) (<o r m)
+     (n-wider-than-mo n m q r))))
+
+(defrel (n-wider-than-mo n m q r)
+  (fresh (nh nl qh ql)
+    (fresh (mql mrql rr rh)
+      (splito n r nl nh)
+      (splito q r ql qh)
+      (conde
+        ((== '() nh)
+         (== '() qh)
+         (minuso nl r mql)
+         (*o m ql mql))
+        ((poso nh)
+         (*o m ql mql)
+         (pluso r mql mrql)
+         (minuso mrql nl rr)
+         (splito rr r '() rh)
+         (/o nh m qh rh))))))
+
 (defrel (logo n b q r)
   (conde
-    ((== '(1) n) (poso b) (== '() q) (== '() r))
-    ((== '() q) (<o n b) (pluso r '(1) n))
-    ((== '(1) q) (>1o b) (=lo n b) (pluso r b n))
-    ((== '(1) b) (poso q) (pluso r '(1) n))
+    ((== '() q) (<=o n b)
+     (pluso r '(1) n))
+    ((== '(1) q) (>1o b) (=lo n b)
+     (pluso r b n))
+    ((== '(1) b) (poso q)
+     (pluso r '(1) n))
     ((== '() b) (poso q) (== r n))
     ((== '(0 1) b)
      (fresh (a ad dd)
        (poso dd)
        (== `(,a ,ad . ,dd) n)
-       (exp2 n '() q)
+       (exp2o n '() q)
        (fresh (s)
          (splito n dd r s))))
-    ((fresh (a ad add ddd)
-       (conde
-         ((== '(1 1) b))
-         ((== `(,a ,ad ,add . ,ddd) b))))
-     (<lo b n)
-     (fresh (bw1 bw nw nw1 ql1 ql s)
-       (exp2 b '() bw1)
-       (pluso bw1 '(1) bw)
-       (<lo q n)
-       (fresh (q1 bwq1)
-         (pluso q '(1) q1)
-         (*o bw q1 bwq1)
-         (<o nw1 bwq1))
-       (exp2 n '() nw1)
-       (pluso nw1 '(1) nw)
-       (/o nw bw ql1 s)
-       (pluso ql '(1) ql1)
-       (<=lo ql q)
-       (fresh (bql qh s qdh qd)
-         (repeated-mul b ql bql)
-         (/o nw bw1 qh s)
-         (pluso ql qdh qh)
-         (pluso ql qd q)
-         (<=o qd qdh)
-         (fresh (bqd bq1 bq)
-           (repeated-mul b qd bqd)
-           (*o bql bqd bq)
-           (*o b bq bq1)
-           (pluso bq r n)
-           (<o n bq1)))))))
+    ((<=o '(1 1) b) (<lo b n)
+     (base-three-or-moreo n b q r))))
 
-(defrel (exp2 n b q)
+(defrel (exp2o n b q)
   (conde
     ((== '(1) n) (== '() q))
     ((>1o n) (== '(1) q)
      (fresh (s)
        (splito n b s '(1))))
     ((fresh (q1 b2)
-       (== `(0 . ,q1) q)
-       (poso q1)
+       (== `(0 . ,q1) q) (poso q1)
        (<lo b n)
        (appendo b `(1 . ,b) b2)
-       (exp2 n b2 q1)))
+       (exp2o n b2 q1)))
     ((fresh (q1 nh b2 s)
-       (== `(1 . ,q1) q)
-       (poso q1)
+       (== `(1 . ,q1) q) (poso q1)
        (poso nh)
        (splito n b s nh)
        (appendo b `(1 . ,b) b2)
-       (exp2 nh b2 q1)))))
+       (exp2o nh b2 q1)))))
 
-(defrel (repeated-mul n q nq)
+(defrel (base-three-or-moreo n b q r)
+  (fresh (bw1 bw nw nw1 ql1 ql s)
+    (exp2o b '() bw1)
+    (pluso bw1 '(1) bw)
+    (<lo q n)
+    (fresh (q1 bwq1)
+      (pluso q '(1) q1)
+      (*o bw q1 bwq1)
+      (<o nw1 bwq1))
+    (exp2o n '() nw1)
+    (pluso nw1 '(1) nw)
+    (/o nw bw ql1 s)
+    (pluso ql '(1) ql1)
+    (<=lo ql q)
+    (fresh (bql qh s qdh qd)
+      (repeated-mulo b ql bql)
+      (/o nw bw1 qh s)
+      (pluso ql qdh qh)
+      (pluso ql qd q)
+      (<=o qd qdh)
+      (fresh (bqd bq1 bq)
+        (repeated-mulo b qd bqd)
+        (*o bql bqd bq)
+        (*o b bq bq1)
+        (pluso bq r n)
+        (<o n bq1)))))
+
+(defrel (repeated-mulo n q nq)
   (conde
     ((poso n) (== '() q) (== '(1) nq))
     ((== '(1) q) (== n nq))
     ((>1o q)
      (fresh (q1 nq1)
        (pluso q1 '(1) q)
-       (repeated-mul n q1 nq1)
+       (repeated-mulo n q1 nq1)
        (*o nq1 n nq)))))
 
 (defrel (expo b q n)
   (logo n b q '()))
-
