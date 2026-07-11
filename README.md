@@ -60,13 +60,13 @@ To run tests:
 After putting the directory in Guile's load path:
 
 ```
-(use-modules (faster-miniKanren mk-guile))
+(use-modules (faster-minikanren mk-guile))
 ```
 
-To run tests:
+To run tests (with the directory's parent on the load path):
 
 ```
-guile test-guile.scm
+guile -L .. test-all-guile.scm
 ```
 
 ## Other code
