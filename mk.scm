@@ -537,8 +537,8 @@
        (let ((x (walk* x (state-S st))) ...)
          ((fresh () g g* ...) st))))))
 
-(define succeed (== #f #f))
-(define fail (== #f #t))
+(define (succeed st) st)
+(define (fail st) #f)
 
 
 ; Reification
