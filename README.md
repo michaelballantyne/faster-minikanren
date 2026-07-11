@@ -14,7 +14,7 @@ Eigen was removed.
 
 #### From the Package Server
 
-This is available on the [Racket package server](https://pkgn.racket-lang.org/package/faster-minikanren), so it can be installed with Racket's package manager:
+This is available on the [Racket package server](https://pkgs.racket-lang.org/package/faster-minikanren), so it can be installed with Racket's package manager:
 
 ```
 raco pkg install faster-minikanren
