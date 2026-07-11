@@ -5,6 +5,7 @@
             conde
             symbolo numbero stringo
             absento
+            succeed fail
             matche))
 
 (import (rnrs (6)))
